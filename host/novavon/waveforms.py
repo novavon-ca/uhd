@@ -14,17 +14,24 @@ def sine(ampl, wave_freq, rate, ret_time_samples=False):
     else:
         return data
 
-def dc_chirp(ampl, bw, fs, num_samples, pad=0, ret_time_samples=False):
+def dc_chirp(ampl, bw, fs, num_samples, ret_time_samples=False):
 
-    t = 1/fs * np.arange(0, num_samples)
+    # t = 1/fs * np.arange(0, num_samples)
+    duration = 100e-6
+    num_samples = int(duration * fs)
+    t = np.linspace(0, duration, num_samples)
     chirp = ampl * np.array(np.exp(1j*np.pi*0.5*(bw/t[-1])*(t**2)), dtype=np.complex64)
     max_samples = 2040
 
-    if pad:
-        num_zeros = int(min(pad, max_samples-num_samples))
+    num_zeros = int(max_samples - num_samples)
+    if num_zeros > 0:
         chirp = np.concatenate([chirp, np.zeros([num_zeros,])])
         # chirp = np.pad(chirp, num_zeros, 'constant', constant_values=(0))
         t = 1/fs * np.arange(0, num_samples+num_zeros)
+
+    # plt.figure()
+    # plt.plot(t, np.real(chirp))
+    # plt.show()
 
     if ret_time_samples:
         return chirp, t

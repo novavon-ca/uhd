@@ -65,7 +65,7 @@ def rx_worker(usrp, rx_streamer, rx_statistics, rx_data):
 
     # Make a receive buffer
     num_channels: int = int(rx_streamer.get_num_channels())
-    num_samples_per_packet: int = 1000 #int(rx_streamer.get_max_num_samps())
+    num_samples_per_packet: int = 2000 #int(rx_streamer.get_max_num_samps())
     total_samples = len(rx_data)
     assert(num_samples_per_packet <= rx_streamer.get_max_num_samps())
     metadata = uhd.types.RXMetadata()
@@ -192,11 +192,30 @@ def generate_output(args, tx_data, rx_data, tx_stats, rx_stats):
     if args["plot_data"]:
         if args["verbose"]:
             logger.info("Plotting received data...")
+
+        time_vec_tx = 1/args["sampling_rate"] * np.arange(0, len(tx_data))
+        time_vec_rx = 1/args["sampling_rate"] * np.arange(0, len(rx_data))
+        
         import matplotlib.pyplot as plt
         plt.figure()
-        plt.plot(np.real(tx_data))
-        plt.plot(np.real(rx_data))
+        plt.plot(time_vec_tx * 1e6, np.real(tx_data))
+        plt.plot(time_vec_rx * 1e6, np.real(rx_data))
+        plt.xlabel('Time [us]')
         plt.legend(["Transmitted", "Received"])
+
+        # Plot frequency-domain data
+        tx_fd = np.fft.fft(tx_data)
+        freqs_tx = np.fft.fftfreq(len(tx_fd), d=time_vec_tx[1]-time_vec_tx[0])
+        rx_fd = np.fft.fft(rx_data)
+        freqs_rx = np.fft.fftfreq(len(rx_fd), d=time_vec_rx[1]-time_vec_rx[0])
+        plt.figure()
+        plt.plot(freqs_tx /1e6, 20*np.log10(np.abs(tx_fd / len(tx_fd))))
+        plt.plot(freqs_rx /1e6, 20*np.log10(np.abs(rx_fd / len(rx_fd))))
+        plt.xlabel('Frequency [MHz]')
+        plt.ylabel('Magnitude [dB]')
+        plt.legend(["Transmitted", "Received"])
+        plt.ylim(-80, -10)
+        plt.grid(True)
         plt.show()
     
     if args["verbose"]:
@@ -211,26 +230,26 @@ def main():
     args: dict[str, Any] = {
         "clock_ref": "internal",
         "pps": "internal",
-        "center_freq": 0.85e9,
-        "sampling_rate": 20e6, # samples per second
-        "chirp_bw": 5e6,
+        "center_freq": 1e9,
+        "sampling_rate": 5e6, # samples per second
+        "chirp_bw": 1e6,
         "chirp_ampl": 0.3, #float between 0 and 1
 
         # "tx_rate": sampling_rate,
-        "tx_samples": 2000,
-        "tx_gain": 60, # [dB]
+        "tx_samples": 100,
+        "tx_gain": 65, # [dB]
         "tx_cpu_sample_mode": "fc32",
         "tx_otw_sample_mode": "sc16",
 
         # "rx_rate": sampling_rate,
-        "rx_samples": 50000,
+        "rx_samples": 200000,
         "rx_antenna": "RX2", # "RX2" or "TX/RX"
-        "rx_gain": 50,  # [dB]
+        "rx_gain": 45,  # [dB]
         "rx_cpu_sample_mode": "fc32",
         "rx_otw_sample_mode": "sc16",
         "rx_auto_gain": False,
 
-        "output_filename": "TEST.mat", # set to empty string to not save data to file
+        "output_filename": "", # set to empty string to not save data to file
         "plot_data": True,
         "verbose": False,
     }
