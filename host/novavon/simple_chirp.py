@@ -3,15 +3,14 @@ import argparse
 import logging
 import numpy as np
 import sys
-import time
 import threading
 from typing import Any, List
-from datetime import datetime, timedelta
+
 from scipy.io import savemat
-import matplotlib.pyplot as plta
 
 from logs import LogFormatter
 from waveforms import dc_chirp
+from usrp_settings import usrp_setup
 
 def validate_args(args):
     """
@@ -61,27 +60,8 @@ def validate_args(args):
     return valid, msg
 
 
-def setup_ref(usrp, ref):
-    """Setup the reference clock"""
-
-    usrp.set_clock_source(ref)
-
-    # Lock onto clock signals
-    if ref != "internal":
-        logger.debug("Now confirming lock on clock signals...")
-        end_time = datetime.now() + timedelta(milliseconds=CLOCK_TIMEOUT)
-        is_locked = usrp.get_mboard_sensor("ref_locked", 0)
-        while (not is_locked) and (datetime.now() < end_time):
-            time.sleep(1e-3)
-            is_locked = usrp.get_mboard_sensor("ref_locked", 0)
-        if not is_locked:
-            logger.error("Unable to confirm clock signal locked on board %d", 0)
-            return False
-    return True
-
-
 def rx_worker(usrp, rx_streamer, rx_statistics, rx_data):
-    """Set up rx antenna"""
+    """Receive a fixed number of samples and store in rx_data"""
 
     # Make a receive buffer
     num_channels: int = int(rx_streamer.get_num_channels())
@@ -104,21 +84,8 @@ def rx_worker(usrp, rx_streamer, rx_statistics, rx_data):
     stream_cmd.time_spec = uhd.types.TimeSpec(usrp.get_time_now().get_real_secs() + RX_DELAY)
     rx_streamer.issue_stream_cmd(stream_cmd)
 
-    # To estimate the number of dropped samples in an overflow situation, we need the following
-    # On the first overflow, set had_an_overflow and record the time
-    # On the next ERROR_CODE_NONE, calculate how long its been since the recorded time, and use the
-    #   tick rate to estimate the number of dropped samples. Also, reset the tracking variables
-    had_an_overflow = False
-    last_overflow = uhd.types.TimeSpec(0)
-    # Setup the statistic counters
     num_rx_samps: int = 0
-    num_rx_dropped: int = 0
-    num_rx_overruns: int = 0
-    num_rx_seqerr: int = 0
-    num_rx_timeouts: int = 0
-    num_rx_late: int = 0
 
-    rate = usrp.get_rx_rate()
     # Receive until we get the signal to stop
     # while not timer_elapsed_event.is_set():
     for ii in range(total_samples//num_samples_per_packet):
@@ -131,55 +98,20 @@ def rx_worker(usrp, rx_streamer, rx_statistics, rx_data):
             logger.error("Runtime error in receive: %s", ex)
             return
 
-        # Handle the error codes
-        if metadata.error_code == uhd.types.RXMetadataErrorCode.none:
-            # Reset the overflow flag
-            if had_an_overflow:
-                had_an_overflow = False
-                num_rx_dropped += uhd.types.TimeSpec(
-                    metadata.time_spec.get_real_secs() - last_overflow.get_real_secs()
-                ).to_ticks(rate)
-        elif metadata.error_code == uhd.types.RXMetadataErrorCode.overflow:
-            had_an_overflow = True
-            last_overflow = metadata.time_spec
-            # If we had a sequence error, record it
-            if metadata.out_of_sequence:
-                num_rx_seqerr += 1
-                logger.warning("Detected RX sequence error.")
-            # Otherwise just count the overrun
-            else:
-                num_rx_overruns += 1
-        elif metadata.error_code == uhd.types.RXMetadataErrorCode.late:
-            logger.warning("Receiver error: %s, restarting streaming...", metadata.strerror())
-            num_rx_late += 1
-            # Radio core will be in the idle state. Issue stream command to restart streaming.
-            stream_cmd.time_spec = uhd.types.TimeSpec(
-                usrp.get_time_now().get_real_secs() + INIT_DELAY)
-            stream_cmd.stream_now = False
-            rx_streamer.issue_stream_cmd(stream_cmd)
-        elif metadata.error_code == uhd.types.RXMetadataErrorCode.timeout:
-            logger.warning("Receiver error: %s, continuing...", metadata.strerror())
-            num_rx_timeouts += 1
-        else:
-            logger.error("Receiver error: %s", metadata.strerror())
-            logger.error("Unexpected error on receive, continuing...")
-
     # Return the statistics to the main thread
     rx_statistics["num_rx_samps"] = num_rx_samps
-    rx_statistics["num_rx_dropped"] = num_rx_dropped
-    rx_statistics["num_rx_overruns"] = num_rx_overruns
-    rx_statistics["num_rx_seqerr"] = num_rx_seqerr
-    rx_statistics["num_rx_timeouts"] = num_rx_timeouts
-    rx_statistics["num_rx_late"] = num_rx_late
+
     # After we get the signal to stop, issue a stop command
     rx_streamer.issue_stream_cmd(uhd.types.StreamCMD(uhd.types.StreamMode.stop_cont))
 
 
 def tx_worker(usrp, tx_streamer, tx_statistics, transmit_buffer):
-    """Transmit a chirp pulse"""
+    """Stream data stored in transmit_buffer"""
+    
+    assert(len(transmit_buffer) <= tx_streamer.get_max_num_samps())
 
     # Make a transmit buffer
-    num_channels = tx_streamer.get_num_channels()
+    num_channels = 1
     metadata = uhd.types.TXMetadata()
     metadata.start_of_burst = True
     metadata.end_of_burst = False
@@ -196,7 +128,7 @@ def tx_worker(usrp, tx_streamer, tx_statistics, transmit_buffer):
         num_acc_samps += min(total_num_samps - num_acc_samps,
                                 tx_streamer.get_max_num_samps())
         # metadata.has_time_spec = False
-        # metadata.start_of_burst = False
+        metadata.start_of_burst = False
 
     tx_statistics["num_tx_samps"] = num_tx_samps
 
@@ -207,77 +139,18 @@ def tx_worker(usrp, tx_streamer, tx_statistics, transmit_buffer):
 
 def print_statistics(rx_statistics, tx_statistics):
     """Print TRX statistics in a formatted block"""
-    # Print the statistics
-    statistics_msg = """Benchmark rate summary:
+    
+    statistics_msg = """
     Num received samples:     {}
-    Num dropped samples:      {}
-    Num overruns detected:    {}
     Num transmitted samples:  {}
-    Num sequence errors (Rx): {}
-    Num late commands:        {}
-    Num timeouts (Rx):        {}""".format(
+    """.format(
         rx_statistics.get("num_rx_samps", 0),
-        rx_statistics.get("num_rx_dropped", 0),
-        rx_statistics.get("num_rx_overruns", 0),
-        tx_statistics.get("num_tx_samps", 0),
-        rx_statistics.get("num_rx_seqerr", 0),
-        rx_statistics.get("num_rx_late", 0),
-        rx_statistics.get("num_rx_timeouts", 0))
+        tx_statistics.get("num_tx_samps", 0))
     logger.info(statistics_msg)
 
 
-
-def usrp_settings(args, verbose):
-    """
-    Sets up USRP device according to user-defined args
-    returns: MultiUSRP object
-    """
-    # Create usrp device
-    usrp = uhd.usrp.MultiUSRP()
-    if verbose:
-        logger.info("Using Device: %s", usrp.get_pp_string())
-    
-    # Set the reference clock
-    if not setup_ref(usrp, args["clock_ref"]):
-        return False
-
-    # Set the PPS source
-    usrp.set_time_source(args["pps"])
-    
-    # At this point, we can assume the device has valid and locked clock and PPS
-
-    # Tx settings
-    usrp.set_tx_rate(args["tx_rate"])
-    usrp.set_tx_gain(args["tx_gain"], 0)
-    usrp.set_tx_freq(uhd.libpyuhd.types.tune_request(args["center_freq"]), 0)
-    usrp.set_tx_antenna("TX/RX", 0)
-
-    # Rx settings
-    usrp.set_rx_rate(args["rx_rate"])
-    usrp.set_rx_gain(args["rx_gain"], 0)
-    usrp.set_rx_freq(uhd.libpyuhd.types.tune_request(args["center_freq"]), 0)
-    usrp.set_rx_antenna(args["rx_antenna"], 0)
-    if args["rx_auto_gain"]:
-        usrp.set_rx_agc(True, 0)
-
-    # Read back settings
-    if verbose:
-        logger.info("Actual TX Freq: %f MHz...", usrp.get_tx_freq(0) / 1e6)
-        logger.info("Actual TX Gain: %f dB...", usrp.get_tx_gain(0))
-        logger.info("Actual TX Bandwidth: %f MHz...", usrp.get_tx_bandwidth(0))
-
-        logger.info("Actual RX Freq: %f MHz...", usrp.get_rx_freq(0) / 1e6)
-        logger.info("Actual RX Gain: %f dB...", usrp.get_rx_gain(0))
-        logger.info("Actual RX Bandwidth: %f MHz...", usrp.get_rx_bandwidth(0))
-
-    usrp.set_time_now(uhd.types.TimeSpec(0.0))
-    if verbose:
-        ("Set device timestamp to 0")
-
-    return usrp
-
-
 def start_threads(usrp, args, tx_buf, rx_buf):
+    # @TODO: make this able to take in more general tx and rx workers
     threads: List[threading.Thread] = []
 
     rx_statistics: dict[str, int] = {}
@@ -307,6 +180,15 @@ def start_threads(usrp, args, tx_buf, rx_buf):
 
 
 def generate_output(args, tx_data, rx_data, tx_stats, rx_stats):
+
+    if args.get("output_filename", ""):
+        filename = args["output_filename"]
+        if args["verbose"]:
+            logger.info("Acquisition complete! Writing to file...")
+        
+        savemat(filename, {"data": rx_data})
+        logger.info(f"Data written to {filename}")
+    
     if args["plot_data"]:
         if args["verbose"]:
             logger.info("Plotting received data...")
@@ -316,19 +198,11 @@ def generate_output(args, tx_data, rx_data, tx_stats, rx_stats):
         plt.plot(np.real(rx_data))
         plt.legend(["Transmitted", "Received"])
         plt.show()
-
-    if args.get("output_filename", ""):
-        filename = args["output_filename"]
-        if args["verbose"]:
-            logger.info("Acquisition complete! Writing to file...")
-        
-        savemat(filename, {"data": rx_data})
-
-        if args["verbose"]:
-            logger.info(f"Data written to {filename}")
     
     if args["verbose"]:
         print_statistics(rx_stats, tx_stats)
+    
+    return
 
 
 def main():
@@ -339,10 +213,8 @@ def main():
         "pps": "internal",
         "center_freq": 0.85e9,
         "sampling_rate": 20e6, # samples per second
-
-        "waveform": "chirp", # "chirp" or "sine"
-        "ampl": 0.3, #float between 0 and 1
         "chirp_bw": 5e6,
+        "chirp_ampl": 0.3, #float between 0 and 1
 
         # "tx_rate": sampling_rate,
         "tx_samples": 2000,
@@ -358,7 +230,7 @@ def main():
         "rx_otw_sample_mode": "sc16",
         "rx_auto_gain": False,
 
-        "output_filename": "", # set to empty string to not save data to file
+        "output_filename": "TEST.mat", # set to empty string to not save data to file
         "plot_data": True,
         "verbose": False,
     }
@@ -366,15 +238,16 @@ def main():
     args.update({"tx_rate": args["sampling_rate"], "rx_rate": args["sampling_rate"]})
     verbose = args["verbose"]
 
+    # TODO: implement arg checking, command-line args
     # args = argparse()
     # success, err_msg = validate_args(args)
     # if not success:
     #     logging.error(err_msg)
 
-    usrp = usrp_settings(args, verbose)
+    usrp = usrp_setup(args, logger, verbose)
 
-    rx_buffer = np.zeros(args['rx_samples'], dtype=np.complex64)
-    tx_buffer = dc_chirp(args["ampl"], args["chirp_bw"], args["sampling_rate"], args['tx_samples'])
+    rx_buffer = np.zeros(args["rx_samples"], dtype=np.complex64)
+    tx_buffer = dc_chirp(args["chirp_ampl"], args["chirp_bw"], args["sampling_rate"], args['tx_samples'])
     tx_dat, rx_dat, tx_stats, rx_stats = start_threads(usrp, args, tx_buffer, rx_buffer)
     generate_output(args, tx_dat, rx_dat, tx_stats, rx_stats)
 
@@ -382,9 +255,7 @@ def main():
 
 
 if __name__ == "__main__":
-    CLOCK_TIMEOUT = 1000  # 1000mS timeout for external clock locking
-    INIT_DELAY = 0.05  # 50mS initial delay before transmit
-    RX_DELAY = 0.01 # offset delay between transmitting and receiving
+    RX_DELAY = 0.01 # offset delay between transmitting and receiving @TODO: put this into args?
 
     global logger
     logger = logging.getLogger(__name__)
