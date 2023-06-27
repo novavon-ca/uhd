@@ -199,8 +199,9 @@ def main():
     usrp = usrp_setup(args, logger, verbose)
 
     rx_buffer = np.zeros(args["rx_samples"], dtype=np.complex64)
+    chirp_duration = args["tx_samples"] / args["sampling_rate"]
     tx_buffer = dc_chirp(
-        args["chirp_ampl"], args["chirp_bw"], args["sampling_rate"], args["tx_samples"]
+        args["chirp_ampl"], args["chirp_bw"], args["sampling_rate"], chirp_duration
     )
     tx_dat, rx_dat, tx_stats, rx_stats = start_threads(usrp, tx_buffer, rx_buffer)
     generate_output(args, tx_dat, rx_dat, tx_stats, rx_stats)
