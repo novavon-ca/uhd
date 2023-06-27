@@ -1,7 +1,9 @@
-import uhd 
+import uhd
 import logging
 from datetime import datetime, timedelta
 import time
+from typing import Any
+import numpy as np
 
 
 def setup_ref(usrp, ref, logger):
@@ -29,18 +31,23 @@ def usrp_setup(args, logger, verbose=False):
     Sets up USRP device according to user-defined args
     returns: MultiUSRP object
     """
+
+    # TODO: later this can come from a settings JSON file
+    clock_ref = "internal"
+    pps = "internal"
+
     # Create usrp device
     usrp = uhd.usrp.MultiUSRP()
     if verbose:
         logger.info("Using Device: %s", usrp.get_pp_string())
-    
+
     # Set the reference clock
-    if not setup_ref(usrp, args["clock_ref"], logger):
+    if not setup_ref(usrp, clock_ref, logger):
         return False
 
     # Set the PPS source
-    usrp.set_time_source(args["pps"])
-    
+    usrp.set_time_source(pps)
+
     # At this point, we can assume the device has valid and locked clock and PPS
 
     # Tx settings
@@ -53,7 +60,7 @@ def usrp_setup(args, logger, verbose=False):
     usrp.set_rx_rate(args["rx_rate"])
     usrp.set_rx_gain(args["rx_gain"], 0)
     usrp.set_rx_freq(uhd.libpyuhd.types.tune_request(args["center_freq"]), 0)
-    usrp.set_rx_antenna(args["rx_antenna"], 0)
+    usrp.set_rx_antenna("RX2", 0)  # "RX2" or "TX/RX"
     if args["rx_auto_gain"]:
         usrp.set_rx_agc(True, 0)
 
@@ -72,3 +79,36 @@ def usrp_setup(args, logger, verbose=False):
         logger.info("Set device timestamp to 0")
 
     return usrp
+
+
+def tx_setup(usrp):
+    cpu_sample_mode = "fc32"
+    otw_sample_mode = "sc16"
+    st_args = uhd.usrp.StreamArgs(cpu_sample_mode, otw_sample_mode)
+    st_args.channels = [0]
+    tx_streamer = usrp.get_tx_stream(st_args)
+
+    max_samps_per_packet = tx_streamer.get_max_num_samps()
+    tx_buf = np.zeros((1, max_samps_per_packet), dtype=np.complex64)
+
+    metadata = uhd.types.TXMetadata()
+    metadata.has_time_spec = False
+    metadata.start_of_burst = True
+    metadata.end_of_burst = False
+
+    return tx_streamer, tx_buf, metadata
+
+
+def rx_setup(usrp):
+    cpu_sample_mode = "fc32"
+    otw_sample_mode = "sc16"
+    st_args = uhd.usrp.StreamArgs(cpu_sample_mode, otw_sample_mode)
+    st_args.channels = [0]
+    rx_streamer = usrp.get_rx_stream(st_args)
+
+    num_samples_per_packet: int = int(rx_streamer.get_max_num_samps())
+    metadata = uhd.types.RXMetadata()
+
+    recv_buf: np.ndarray = np.empty((1, num_samples_per_packet), dtype=np.complex64)
+
+    return rx_streamer, recv_buf, metadata
