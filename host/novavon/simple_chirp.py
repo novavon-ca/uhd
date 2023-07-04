@@ -206,11 +206,11 @@ def main():
         "chirp_bw": 5e6,
         "chirp_ampl": 0.3,  # float between 0 and 1
         # "tx_samples": 200,
-        "chirp_duration": 1e-5,
+        "chirp_duration": 3e-5,
         "tx_gain": 65,  # [dB]
         "rx_samples": 100000,
         "rx_antenna": "RX2",  # "RX2" or "TX/RX"
-        "rx_gain": 60,  # [dB]
+        "rx_gain": 50,  # [dB]
         "rx_auto_gain": False,
         "output_filename": "",  # set to empty string to not save data to file
         "plot_data": True,
@@ -230,16 +230,16 @@ def main():
 
     rx_buffer = np.zeros(args["rx_samples"], dtype=np.complex64)
     # chirp_duration = args["tx_samples"] / args["sampling_rate"]
-    tx_buffer = np.array(
-        list(map(lambda n: 0.3 * waveforms["sine"](n, 10e4, args["sampling_rate"]),
-            np.arange(
-                int(10 * np.floor(args["sampling_rate"] / 10e4)),
-                dtype=np.complex64))),
-        dtype=np.complex64)  # One period
+    # tx_buffer = np.array(
+    #     list(map(lambda n: 0.3 * waveforms["sine"](n, 10e4, args["sampling_rate"]),
+    #         np.arange(
+    #             int(10 * np.floor(args["sampling_rate"] / 10e4)),
+    #             dtype=np.complex64))),
+    #     dtype=np.complex64)  # One period
     
-    # tx_buffer = dc_chirp(
-    #     args["chirp_ampl"], args["chirp_bw"], args["sampling_rate"], args["chirp_duration"]
-    # )
+    tx_buffer = dc_chirp(
+        args["chirp_ampl"], args["chirp_bw"], args["sampling_rate"], args["chirp_duration"], pad=True
+    )
     tx_dat, rx_dat, tx_stats, rx_stats = start_threads(usrp, tx_buffer, rx_buffer)
     generate_output(args, tx_dat, rx_dat, tx_stats, rx_stats)
     success = True
