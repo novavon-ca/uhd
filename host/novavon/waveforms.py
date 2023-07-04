@@ -15,22 +15,19 @@ def sine(ampl, wave_freq, rate, ret_time_samples=False):
         return data
 
 
-def dc_chirp(ampl, bw, fs, duration, pad=0, ret_time_samples=False):
+def dc_chirp(ampl, bw, fs, duration, pad=False, ret_time_samples=False):
     max_samples = 2040
     num_samples = fs * duration
 
-    if num_samples > max_samples:
-        ValueError(
-            "Number of transmit samples {} should not exceed 2040".format(num_samples)
-        )
-
-    t = np.linspace(0, duration, num_samples)
+    t = np.linspace(0, duration, num=num_samples)
+    # t = np.linspace(-duration/2, duration/2, num=num_samples)
     chirp = ampl * np.array(
-        np.exp(1j * np.pi * 0.5 * (bw / duration) * (t**2)), dtype=np.complex64
+        np.exp(1j * np.pi * 0.5 * (bw / np.max(t)) * (t**2)), dtype=np.complex64
     )
 
-    if pad:
-        num_zeros = min(pad, max_samples - num_samples)
+    if pad and num_samples < max_samples:
+        num_zeros = int(max_samples - num_samples)
+        print(f"Padding with {num_zeros} trailing zeros")
         chirp = np.concatenate(
             [
                 chirp,
@@ -75,9 +72,9 @@ if __name__ == "__main__":
     ampl = 0.3
     wave_freq = 1e4
     sine_rate = 1e6
-    chirp_rate = 20e6
-    chirp_bw = 5e6  # (2e9 - 800e6) / 2
-    chirp_duration = 1e-5 # [seconds]
+    chirp_rate = 50e6
+    chirp_bw = 8e6  # (2e9 - 800e6) / 2
+    chirp_duration = 3e-5 # [seconds]
 
     w1, t1 = sine(ampl, wave_freq, sine_rate, ret_time_samples=True)
 
@@ -86,7 +83,7 @@ if __name__ == "__main__":
 
     # w2, t2 = chirp(5e9, 5e5, 800e6, 2e9, ret_time_samples=True)
     w2, t2 = dc_chirp(
-        ampl, chirp_bw, chirp_rate, chirp_duration, pad=0, ret_time_samples=True
+        ampl, chirp_bw, chirp_rate, chirp_duration, pad=True, ret_time_samples=True
     )
 
     # plt.figure(1)
