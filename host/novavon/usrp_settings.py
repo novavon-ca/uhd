@@ -62,17 +62,18 @@ def usrp_setup(args, logger, verbose=False):
     usrp.set_rx_freq(uhd.libpyuhd.types.tune_request(args["center_freq"]), 0)
     usrp.set_rx_antenna("RX2", 0)  # "RX2" or "TX/RX"
     if args["rx_auto_gain"]:
+        logger.info('Using rx auto gain')
         usrp.set_rx_agc(True, 0)
 
     # Read back settings
     if verbose:
         logger.info("Actual TX Freq: %f MHz...", usrp.get_tx_freq(0) / 1e6)
         logger.info("Actual TX Gain: %f dB...", usrp.get_tx_gain(0))
-        logger.info("Actual TX Bandwidth: %f MHz...", usrp.get_tx_bandwidth(0))
+        logger.info("Actual TX Bandwidth: %f MHz...", usrp.get_tx_bandwidth(0)/ 1e6)
 
         logger.info("Actual RX Freq: %f MHz...", usrp.get_rx_freq(0) / 1e6)
         logger.info("Actual RX Gain: %f dB...", usrp.get_rx_gain(0))
-        logger.info("Actual RX Bandwidth: %f MHz...", usrp.get_rx_bandwidth(0))
+        logger.info("Actual RX Bandwidth: %f MHz...", usrp.get_rx_bandwidth(0)/ 1e6)
 
     usrp.set_time_now(uhd.types.TimeSpec(0.0))
     if verbose:

@@ -5,7 +5,7 @@ import numpy as np
 import sys
 import threading
 from typing import Any, List
-
+import matplotlib.pyplot as plt
 from scipy.io import savemat
 
 from utilities import LogFormatter, validate_args
@@ -49,7 +49,7 @@ def tx_worker(streamer, buf, metadata, waveform):
 
 def rx_worker(usrp, streamer, buf, metadata, recv_data):
     stream_cmd = uhd.types.StreamCMD(uhd.types.StreamMode.start_cont)
-    stream_cmd.stream_now = False
+    stream_cmd.stream_now = True
     stream_cmd.time_spec = uhd.types.TimeSpec(
         usrp.get_time_now().get_real_secs() + RX_DELAY
     )
@@ -78,31 +78,30 @@ def rx_worker(usrp, streamer, buf, metadata, recv_data):
 
 def main():
     # Settings from user - these will come from the command line or a JSON file
-    min_freq: int = 1e9  # [Hz]
-    max_freq: int = 3e9  # [Hz]
-    num_freqs: int = 4
+    min_freq: int = 0.9e9  # [Hz]
+    max_freq: int = 1.2e9  # [Hz]
+    num_freqs: int = 1
     chirp_bw: int = 5e6  # [Hz]
-    chirp_duration: int = 1e-6  # [seconds] TODO: calculate a reasonable value for this
+    chirp_duration: int = 1e-5  # [seconds] TODO: calculate a reasonable value for this
     output_filename: str = ""  # set to empty string to not save data to file
-    verbose: bool = False
+    verbose: bool = True
 
     # Settings the user will not have access to
     sampling_rate: int = 20e6  # samples per second
     chirp_ampl: float = 0.3  # float between 0 and 1
-    tx_gain: int = 60  # [dB]
-    rx_gain: int = 50  # [dB]
+    tx_gain: int = 65  # [dB]
+    rx_gain: int = 60  # [dB]
     rx_samples: int = 50000
     rx_auto_gain: bool = False
     plot_data: bool = True
 
     # Validate input args
+    center_freqs = np.linspace(min_freq, max_freq, num_freqs, endpoint=True)
     success, err_msg = validate_args(min_freq, max_freq, chirp_bw, sampling_rate)
     if not success:
         logging.error(err_msg)
 
     # Set up USRP device and generate tx waveform
-    center_freqs = np.linspace(min_freq, max_freq, num_freqs, endpoint=True)
-
     setup_args = {
         "tx_rate": sampling_rate,
         "tx_gain": tx_gain,
@@ -112,12 +111,18 @@ def main():
         "rx_auto_gain": rx_auto_gain,
     }
     usrp = usrp_setup(setup_args, logger, verbose)
-    waveform = dc_chirp(chirp_ampl, chirp_bw, chirp_duration, sampling_rate)
+    waveform, t = dc_chirp(chirp_ampl, chirp_bw, sampling_rate, chirp_duration, ret_time_samples=True)
+
+    # plt.figure()
+    # plt.plot(t * 1e6, waveform)
+    # plt.xlabel('Time [us]')
+    # plt.title('Baseband tx signal')
+    # plt.show()
 
     # Set up transmit and receive streamers
     tx_streamer, tx_buf, tx_metadata = tx_setup(usrp)
     rx_streamer, recv_buf, rx_metadata = rx_setup(usrp)
-    recv_data = np.zeros(num_freqs, rx_samples, dtype=np.complex64)
+    recv_data = np.zeros([rx_samples, ], dtype=np.complex64)
 
     # Create tx and rx threads
     threads: List[threading.Thread] = []
@@ -141,9 +146,14 @@ def main():
         tune_center_freq(usrp, frequency)
 
         for thr in threads:
-            thr.start()
+            if freq_idx == 0:
+                thr.start()
             thr.join()
 
+        plt.figure()
+        time_vec = 1/sampling_rate * np.arange(0, len(recv_data))
+        plt.plot(np.real(recv_data))
+        
         recv_data_list.append(recv_data)
 
     logger.info("Acquisition complete!")
@@ -157,14 +167,20 @@ def main():
         if verbose:
             logger.info("Plotting received data...")
 
-        legend_text = ["Transmitted"]
-        import matplotlib.pyplot as plt
+        # plt.figure()
+        # time_vec = 1/sampling_rate * np.arange(0, len(recv_data_list[0]))
+        # plt.plot(time_vec * 1e6, np.real(recv_data_list[0]))
+        # plt.plot(time_vec * 1e6, np.real(recv_data_list[1]))
+        # plt.plot(time_vec * 1e6, np.real(recv_data_list[2]))
+        # plt.plot(time_vec * 1e6, np.real(recv_data_list[3]))
 
-        plt.figure()
-        for ii in range(num_freqs):
-            plt.plot(np.real(recv_data_list[ii]))
-            legend_text.append(f"Rx {ii+1}")
-        plt.legend(legend_text)
+        # # for ii in range(num_freqs):
+        #     # plt.plot(time_vec * 1e6, np.real(recv_data_list[ii]))
+        #     # legend_text.append(f"Rx {ii+1}")
+        # legend_text = ['f1', 'f2', 'f3', 'f4']
+        # plt.xlabel('Time [us]')
+        # plt.legend(legend_text)
+        plt.grid(True)
         plt.show()
 
 

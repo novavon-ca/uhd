@@ -1,11 +1,11 @@
 import logging
 from datetime import datetime
-from typing import List, Tuple
+from typing import List
 
 
 def validate_args(
     min_freq: int, max_freq: int, chirp_bw: int, sampling_rate: int
-) -> Tuple(bool, str):
+):
     """
     Validates user input arguments for the following:
 
