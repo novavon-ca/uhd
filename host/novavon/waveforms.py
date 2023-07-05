@@ -19,31 +19,17 @@ def dc_chirp(ampl, bw, fs, duration, pad=False, ret_time_samples=False):
     max_samples = 2040
     num_samples = fs * duration
 
-    t = np.linspace(0, duration, num=num_samples)
-    # t = np.linspace(-duration/2, duration/2, num=num_samples)
+    # t = np.linspace(0, duration, num=num_samples)
+    t = np.linspace(-duration/2, duration/2, num=num_samples)
     chirp = ampl * np.array(
         np.exp(1j * np.pi * 0.5 * (bw / np.max(t)) * (t**2)), dtype=np.complex64
     )
 
     if pad and num_samples < max_samples:
         num_zeros = int(max_samples - num_samples)
-        print(f"Padding with {num_zeros} trailing zeros")
-        chirp = np.concatenate(
-            [
-                chirp,
-                np.zeros(
-                    [
-                        num_zeros,
-                    ]
-                ),
-            ]
-        )
-        # chirp = np.pad(chirp, num_zeros, 'constant', constant_values=(0))
+        print(f"Padding with {num_zeros} zeros")
+        chirp = np.pad(chirp, int(num_zeros/2), 'constant', constant_values=(0))
         t = 1 / fs * np.arange(0, num_samples + num_zeros)
-
-    # plt.figure()
-    # plt.plot(t, np.real(chirp))
-    # plt.show()
 
     if ret_time_samples:
         return chirp, t
