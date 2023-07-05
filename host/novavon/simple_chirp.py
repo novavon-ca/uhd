@@ -188,15 +188,6 @@ def generate_output(args, tx_data, rx_data, tx_stats, rx_stats):
 
 
 def main():
-    waveforms = {
-    "sine": lambda n, tone_offset, rate: np.exp(n * 2j * np.pi * tone_offset / rate),
-    "square": lambda n, tone_offset, rate: np.sign(waveforms["sine"](n, tone_offset, rate)),
-    "const": lambda n, tone_offset, rate: 1 + 1j,
-    "ramp": lambda n, tone_offset, rate:
-            2*(n*(tone_offset/rate) - np.floor(float(0.5 + n*(tone_offset/rate))))
-    }
-
-
     success = False
 
     args: dict[str, Any] = {
@@ -205,7 +196,6 @@ def main():
         "sampling_rate": 50e6,  # samples per second
         "chirp_bw": 5e6,
         "chirp_ampl": 0.3,  # float between 0 and 1
-        # "tx_samples": 200,
         "chirp_duration": 3e-5,
         "tx_gain": 65,  # [dB]
         "rx_samples": 100000,
@@ -229,14 +219,7 @@ def main():
     usrp = usrp_setup(args, logger, verbose)
 
     rx_buffer = np.zeros(args["rx_samples"], dtype=np.complex64)
-    # chirp_duration = args["tx_samples"] / args["sampling_rate"]
-    # tx_buffer = np.array(
-    #     list(map(lambda n: 0.3 * waveforms["sine"](n, 10e4, args["sampling_rate"]),
-    #         np.arange(
-    #             int(10 * np.floor(args["sampling_rate"] / 10e4)),
-    #             dtype=np.complex64))),
-    #     dtype=np.complex64)  # One period
-    
+    # @todo: investigate if zero-padding helps or not
     tx_buffer = dc_chirp(
         args["chirp_ampl"], args["chirp_bw"], args["sampling_rate"], args["chirp_duration"], pad=True
     )
