@@ -231,18 +231,18 @@ def main():
         "clock_ref": "internal",
         "pps": "internal",
         "center_freq": 1e9,
-        "sampling_rate": 5e6, # samples per second
-        "chirp_bw": 1e6,
+        "sampling_rate": 40e6, # samples per second
+        "chirp_bw": 5e6,
         "chirp_ampl": 0.3, #float between 0 and 1
 
         # "tx_rate": sampling_rate,
-        "tx_samples": 100,
-        "tx_gain": 65, # [dB]
+        "tx_samples": 500,
+        "tx_gain": 55, # [dB]
         "tx_cpu_sample_mode": "fc32",
         "tx_otw_sample_mode": "sc16",
 
         # "rx_rate": sampling_rate,
-        "rx_samples": 200000,
+        "rx_samples": 100000,
         "rx_antenna": "RX2", # "RX2" or "TX/RX"
         "rx_gain": 45,  # [dB]
         "rx_cpu_sample_mode": "fc32",
