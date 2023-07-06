@@ -17,7 +17,7 @@ def sine(ampl, wave_freq, rate, ret_time_samples=False):
 
 def dc_chirp(ampl, bw, fs, duration, pad=False, ret_time_samples=False):
     max_samples = 2040
-    num_samples = fs * duration
+    num_samples = int(fs * duration)
 
     # t = np.linspace(0, duration, num=num_samples)
     t = np.linspace(-duration / 2, duration / 2, num=num_samples)
