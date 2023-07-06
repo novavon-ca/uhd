@@ -15,33 +15,20 @@ def sine(ampl, wave_freq, rate, ret_time_samples=False):
         return data
 
 
-def dc_chirp(ampl, bw, fs, duration, pad=0, ret_time_samples=False):
+def dc_chirp(ampl, bw, fs, duration, pad=False, ret_time_samples=False):
     max_samples = 2040
     num_samples = fs * duration
 
-    if num_samples > max_samples:
-        ValueError(
-            "Number of transmit samples {} should not exceed 2040".format(num_samples)
-        )
-
-    t = np.linspace(0, duration, num_samples)
+    # t = np.linspace(0, duration, num=num_samples)
+    t = np.linspace(-duration / 2, duration / 2, num=num_samples)
     chirp = ampl * np.array(
-        np.exp(1j * np.pi * 0.5 * (bw / duration) * (t**2)), dtype=np.complex64
+        np.exp(1j * np.pi * 0.5 * (bw / np.max(t)) * (t**2)), dtype=np.complex64
     )
 
-    if pad:
-        num_zeros = min(pad, max_samples - num_samples)
-        chirp = np.concatenate(
-            [
-                chirp,
-                np.zeros(
-                    [
-                        num_zeros,
-                    ]
-                ),
-            ]
-        )
-        # chirp = np.pad(chirp, num_zeros, 'constant', constant_values=(0))
+    if pad and num_samples < max_samples:
+        num_zeros = int(max_samples - num_samples)
+        print(f"Padding with {num_zeros} zeros")
+        chirp = np.pad(chirp, int(num_zeros / 2), "constant", constant_values=(0))
         t = 1 / fs * np.arange(0, num_samples + num_zeros)
 
     if ret_time_samples:
@@ -72,7 +59,8 @@ if __name__ == "__main__":
     wave_freq = 1e4
     sine_rate = 1e6
     chirp_rate = 50e6
-    chirp_bw = 20e6  # (2e9 - 800e6) / 2
+    chirp_bw = 8e6  # (2e9 - 800e6) / 2
+    chirp_duration = 3e-5  # [seconds]
 
     w1, t1 = sine(ampl, wave_freq, sine_rate, ret_time_samples=True)
 
@@ -81,19 +69,19 @@ if __name__ == "__main__":
 
     # w2, t2 = chirp(5e9, 5e5, 800e6, 2e9, ret_time_samples=True)
     w2, t2 = dc_chirp(
-        ampl, chirp_bw, chirp_rate, num_samples, pad=0, ret_time_samples=True
+        ampl, chirp_bw, chirp_rate, chirp_duration, pad=True, ret_time_samples=True
     )
 
-    plt.figure(1)
-    plt.plot(t1, np.real(w1))
-    plt.plot(t1, np.imag(w1))
-    plt.xlabel("Time [Samples]")
+    # plt.figure(1)
+    # plt.plot(t1, np.real(w1))
+    # plt.plot(t1, np.imag(w1))
+    # plt.xlabel("Time [Samples]")
 
-    plt.figure(2)
-    w1_fd = np.fft.fft(w1)
-    freqs = np.fft.fftfreq(len(w1_fd), d=t1[1] - t1[0])
-    plt.plot(freqs / 1e6, np.abs(w1_fd))
-    plt.xlabel("Freq [MHz]")
+    # plt.figure(2)
+    # w1_fd = np.fft.fft(w1)
+    # freqs = np.fft.fftfreq(len(w1_fd), d=t1[1] - t1[0])
+    # plt.plot(freqs / 1e6, np.abs(w1_fd))
+    # plt.xlabel("Freq [MHz]")
 
     plt.figure(3)
     plt.plot(t2, np.real(w2))

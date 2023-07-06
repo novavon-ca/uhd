@@ -9,6 +9,7 @@ from typing import Any, List
 from scipy.io import savemat
 
 from utilities import LogFormatter
+from utilities import LogFormatter
 from waveforms import dc_chirp
 from usrp_settings import usrp_setup
 
@@ -18,8 +19,7 @@ def rx_worker(usrp, rx_streamer, rx_statistics, rx_data):
 
     # Make a receive buffer
     total_samples: int = len(rx_data)
-    num_samples_per_packet: int = 2000  # int(rx_streamer.get_max_num_samps())
-    assert num_samples_per_packet <= rx_streamer.get_max_num_samps()
+    num_samples_per_packet: int = int(rx_streamer.get_max_num_samps())
     metadata = uhd.types.RXMetadata()
     recv_buffer: np.ndarray = np.empty((1, num_samples_per_packet), dtype=np.complex64)
 
@@ -63,7 +63,7 @@ def rx_worker(usrp, rx_streamer, rx_statistics, rx_data):
 def tx_worker(usrp, tx_streamer, tx_statistics, transmit_buffer):
     """Stream data stored in transmit_buffer"""
 
-    assert len(transmit_buffer) <= tx_streamer.get_max_num_samps()
+    # assert len(transmit_buffer) <= tx_streamer.get_max_num_samps()
 
     # Make a transmit buffer
     metadata = uhd.types.TXMetadata()
@@ -106,15 +106,13 @@ def print_statistics(rx_statistics, tx_statistics):
 
 def start_threads(usrp, tx_buf, rx_buf):
     # @TODO: make this able to take in more general tx and rx workers
-    tx_cpu_sample_mode = "fc32"
-    rx_cpu_sample_mode = "fc32"
-    tx_otw_sample_mode = "sc16"
-    rx_otw_sample_mode = "sc16"
+    cpu_sample_mode = "fc32"
+    otw_sample_mode = "sc16"
 
     threads: List[threading.Thread] = []
 
     rx_statistics: dict[str, int] = {}
-    st_args = uhd.usrp.StreamArgs(rx_cpu_sample_mode, rx_otw_sample_mode)
+    st_args = uhd.usrp.StreamArgs(cpu_sample_mode, otw_sample_mode)
     st_args.channels = [0]
     rx_streamer = usrp.get_rx_stream(st_args)
     rx_thread = threading.Thread(
@@ -124,7 +122,7 @@ def start_threads(usrp, tx_buf, rx_buf):
     rx_thread.setName("rx_stream")
 
     tx_statistics = {}
-    st_args = uhd.usrp.StreamArgs(tx_cpu_sample_mode, tx_otw_sample_mode)
+    st_args = uhd.usrp.StreamArgs(cpu_sample_mode, otw_sample_mode)
     st_args.channels = [0]
     tx_streamer = usrp.get_tx_stream(st_args)
     tx_thread = threading.Thread(
@@ -154,12 +152,33 @@ def generate_output(args, tx_data, rx_data, tx_stats, rx_stats):
     if args["plot_data"]:
         if args["verbose"]:
             logger.info("Plotting received data...")
+
+        tx_data = tx_data[0, :]
+        # rx_data = rx_data[0, :]
+        time_vec_tx = 1 / args["sampling_rate"] * np.arange(0, len(tx_data))
+        time_vec_rx = 1 / args["sampling_rate"] * np.arange(0, len(rx_data))
+
         import matplotlib.pyplot as plt
 
         plt.figure()
-        plt.plot(np.real(tx_data))
-        plt.plot(np.real(rx_data))
+        plt.plot(time_vec_tx * 1e6, np.real(tx_data))
+        plt.plot(time_vec_rx * 1e6, np.real(rx_data))
+        plt.xlabel("Time [us]")
         plt.legend(["Transmitted", "Received"])
+
+        # Plot frequency-domain data
+        tx_fd = np.fft.fft(tx_data)
+        freqs_tx = np.fft.fftfreq(len(tx_fd), d=time_vec_tx[1] - time_vec_tx[0])
+        rx_fd = np.fft.fft(rx_data)
+        freqs_rx = np.fft.fftfreq(len(rx_fd), d=time_vec_rx[1] - time_vec_rx[0])
+        plt.figure()
+        plt.plot(freqs_tx / 1e6, 20 * np.log10(np.abs(tx_fd / len(tx_fd))))
+        plt.plot(freqs_rx / 1e6, 20 * np.log10(np.abs(rx_fd / len(rx_fd))))
+        plt.xlabel("Frequency [MHz]")
+        plt.ylabel("Magnitude [dB]")
+        plt.legend(["Transmitted", "Received"])
+        plt.ylim(-80, -10)
+        plt.grid(True)
         plt.show()
 
     if args["verbose"]:
@@ -172,19 +191,20 @@ def main():
     success = False
 
     args: dict[str, Any] = {
-        "center_freq": 0.85e9,
-        "sampling_rate": 20e6,  # samples per second
+        "output_filename": "",  # set to empty string to not save data to file
+        "center_freq": 1e9,
+        "sampling_rate": 50e6,  # samples per second
         "chirp_bw": 5e6,
         "chirp_ampl": 0.3,  # float between 0 and 1
-        "tx_samples": 2000,
-        "tx_gain": 60,  # [dB]
-        "rx_samples": 50000,
+        "chirp_duration": 3e-5,
+        "tx_gain": 50,  # [dB]
+        "rx_samples": 100000,
         "rx_antenna": "RX2",  # "RX2" or "TX/RX"
         "rx_gain": 50,  # [dB]
         "rx_auto_gain": False,
-        "output_filename": "TEST.mat",  # set to empty string to not save data to file
+        "output_filename": "",  # set to empty string to not save data to file
         "plot_data": True,
-        "verbose": False,
+        "verbose": True,
     }
 
     args.update({"tx_rate": args["sampling_rate"], "rx_rate": args["sampling_rate"]})
@@ -199,10 +219,17 @@ def main():
     usrp = usrp_setup(args, logger, verbose)
 
     rx_buffer = np.zeros(args["rx_samples"], dtype=np.complex64)
-    chirp_duration = args["tx_samples"] / args["sampling_rate"]
+    # @todo: investigate if zero-padding helps or not
     tx_buffer = dc_chirp(
-        args["chirp_ampl"], args["chirp_bw"], args["sampling_rate"], chirp_duration
+        args["chirp_ampl"],
+        args["chirp_bw"],
+        args["sampling_rate"],
+        args["chirp_duration"],
+        pad=True,
     )
+    if len(tx_buffer.shape) == 1:
+        tx_buffer = tx_buffer.reshape(1, tx_buffer.size)
+    print(tx_buffer.shape)
     tx_dat, rx_dat, tx_stats, rx_stats = start_threads(usrp, tx_buffer, rx_buffer)
     generate_output(args, tx_dat, rx_dat, tx_stats, rx_stats)
     success = True
