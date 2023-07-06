@@ -74,8 +74,8 @@ len_zero_padding = 2**22 - num_samples  # int(
 #     1000 * num_freqs * chirp_duration * sampling_rate
 # )  # TODO: decide on this number
 summed_sub_pulses_fd = np.empty([num_samples + 2 * len_zero_padding])
-plt.figure()
-for ii in range(1):
+# plt.figure()
+for ii in range(num_freqs):
     # 1. Take FFT
     # TODO: do we need the normalization and dc-removal?
     td_signal = recv_data_list[ii] / max(recv_data_list[ii])
@@ -90,60 +90,63 @@ for ii in range(1):
     fd_signal_filt = compressed_fd * window
 
     # 4. Zero-pad symmetrically about DC
+    fd_signal_filt = np.fft.fftshift(fd_signal_filt) # shift DC component to center of spectrum
     fd_signal_filt_padded = np.pad(
         fd_signal_filt, len_zero_padding, "constant", constant_values=(0)
     )
     df = fft_freqs[1] - fft_freqs[0]
     new_max_freq = sampling_rate / 2 + len_zero_padding * df
-    print(np.max(new_max_freq) / 1e6)
+    # print(np.max(new_max_freq) / 1e6)
     padded_freqs = np.linspace(
         -1 * new_max_freq, new_max_freq, num_samples + 2 * len_zero_padding
     )
-    print(len(padded_freqs))
+    # print(padded_freqs[1:5], padded_freqs[-5:-1])
 
-    # 5. TODO: Frequency-shift to correct center freq
-    shift = # find index of center_freqs[ii]
-    fd_signal_filt_padded = np.roll(shift)
+    # 5. Frequency-shift to center freq
+    shift = np.argmin(np.abs(padded_freqs - center_freqs[ii]))
+    # print(shift, padded_freqs[shift])
+    fd_signal_filt_padded_shifted = np.roll(fd_signal_filt_padded, -shift)
 
     # 6. Sum sub-pulses
-    summed_sub_pulses_fd = summed_sub_pulses_fd + fd_signal_filt_padded
+    summed_sub_pulses_fd = summed_sub_pulses_fd + fd_signal_filt_padded_shifted
 
-    plt.plot(fft_freqs / 1e6, np.abs(fd_signal))
-    plt.plot(fft_freqs / 1e6, np.abs(compressed_fd))
-    plt.plot(fft_freqs / 1e6, np.abs(fd_signal_filt))
-    # plt.plot(shifted_freqs / 1e6, np.abs(fd_signal_filt_padded))
+    # plt.plot(fft_freqs / 1e6, np.abs(fd_signal))
+    # plt.plot(fft_freqs / 1e6, np.abs(compressed_fd))
+    # plt.plot(np.fft.fftshift(fft_freqs) / 1e6, np.abs(fd_signal_filt))
+    # plt.plot(padded_freqs / 1e6, np.abs(fd_signal_filt_padded_shifted))
 
 # 7. IFFT
 summed_sub_pulses_td = np.real(np.fft.ifft(summed_sub_pulses_fd))
 
-plt.legend(
-    [
-        "f1 raw",
-        "f1 compressed",
-        "f1 filt",
-        "f2 raw",
-        "f2 compressed",
-        "f2 filt",
-        "f3 raw",
-        "f3 compressed",
-        "f3 filt",
-    ]
-)
-plt.xlabel("Frequencies [MHz]")
-plt.grid()
+# plt.legend(
+#     [
+#         "f1 raw",
+#         "f1 compressed",
+#         "f1 filt",
+#         "f1 shifted"
+#         # "f2 raw",
+#         # "f2 compressed",
+#         # "f2 filt",
+#         # "f3 raw",
+#         # "f3 compressed",
+#         # "f3 filt",
+#     ]
+# )
+# plt.xlabel("Frequencies [MHz]")
+# plt.grid()
+
+# plt.figure()
+# plt.title("Sum of frequency-domain pulses")
+# plt.plot(
+#     padded_freqs / 1e6,
+#     np.abs(summed_sub_pulses_fd),
+# )
 
 plt.figure()
-plt.title("Sum of frequency-domain pulses")
-plt.plot(
-    # fft_freqs / 1e6,
-    np.abs(summed_sub_pulses_fd),
-    "--",
-)
-# plt.figure()
-# t = np.linspace(0, np.max(time_vector), len(summed_sub_pulses_td))
-# plt.plot(t, summed_sub_pulses_td)
-# plt.plot(time_vector, np.sum(recv_data_list, axis=0))
-# plt.grid()
-# plt.xlabel("Time")
-# plt.legend(["Reconstructed", "Sum of original signals"])
+t = np.linspace(0, np.max(time_vector), len(summed_sub_pulses_td))
+plt.plot(t, summed_sub_pulses_td)
+plt.plot(time_vector, np.sum(recv_data_list, axis=0))
+plt.grid()
+plt.xlabel("Time")
+plt.legend(["Reconstructed", "Sum of original signals"])
 plt.show()
