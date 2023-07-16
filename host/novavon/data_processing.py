@@ -67,83 +67,92 @@ else:
 # 6. Sum the freq-domain sub-pulses
 # 7. IFFT
 reference_pulse = dc_chirp(1, chirp_bw, sampling_rate, chirp_duration)
-reference_pulse = reference_pulse / max(reference_pulse)  # TODO: do we need this?
-fd_ref = np.fft.fft(reference_pulse, n=num_samples)
+# reference_pulse = reference_pulse / max(reference_pulse)  # TODO: do we need this?
+fd_ref = np.fft.fft(reference_pulse, n=num_samples) / (len(reference_pulse) / 2.0)
 fft_freqs = np.fft.fftfreq(num_samples, d=dt)
 len_zero_padding = 2**22 - num_samples  # int(
 #     1000 * num_freqs * chirp_duration * sampling_rate
-# )  # TODO: decide on this number
+# )
 summed_sub_pulses_fd = np.empty([num_samples + 2 * len_zero_padding])
 plt.figure()
-for ii in range(1):
+for ii in range(num_freqs):
     # 1. Take FFT
     # TODO: do we need the normalization and dc-removal?
-    td_signal = recv_data_list[ii] / max(recv_data_list[ii])
-    td_signal = td_signal - np.mean(td_signal)
-    fd_signal = np.fft.fft(td_signal)
+    td_signal = recv_data_list[ii]  # / max(recv_data_list[ii])
+    # td_signal = td_signal - np.mean(td_signal)
+    fd_signal = np.fft.fft(td_signal) / (len(td_signal) / 2.0)
 
     # 2. Apply matched filter
     compressed_fd = fd_signal * np.conj(fd_ref)
 
     # 3. Filter with rectangular / tukey window
     window = windows.tukey(num_samples, alpha=0.01)
-    fd_signal_filt = compressed_fd * window
+    fd_signal_filt = np.fft.fftshift(compressed_fd) * window
 
     # 4. Zero-pad symmetrically about DC
-    fd_signal_filt_padded = np.pad(
-        fd_signal_filt, len_zero_padding, "constant", constant_values=(0)
+    fft_freqs_shifted = np.fft.fftshift(fft_freqs)
+    fd_signal_padded = np.pad(
+        fd_signal_filt,
+        # np.fft.fftshift(compressed_fd),
+        len_zero_padding,
+        "constant",
+        constant_values=(0),
     )
     df = fft_freqs[1] - fft_freqs[0]
-    new_max_freq = sampling_rate / 2 + len_zero_padding * df
-    print(np.max(new_max_freq) / 1e6)
+    new_max_freq = np.max(fft_freqs) + len_zero_padding * df
+    print("New max freq in MHz after padding:", np.max(new_max_freq) / 1e6)
     padded_freqs = np.linspace(
-        -1 * new_max_freq, new_max_freq, num_samples + 2 * len_zero_padding
+        -1 * new_max_freq, new_max_freq, num=len(fd_signal_padded), endpoint=False
     )
-    print(len(padded_freqs))
 
-    # 5. TODO: Frequency-shift to correct center freq
-    shift = # find index of center_freqs[ii]
-    fd_signal_filt_padded = np.roll(shift)
+    # 5. Frequency-shift to correct center freq
+    shift = np.argmin(np.abs(np.fft.ifftshift(padded_freqs) - center_freqs[ii]))
+    fd_signal_padded_shifted = np.roll(fd_signal_padded, shift)
 
     # 6. Sum sub-pulses
-    summed_sub_pulses_fd = summed_sub_pulses_fd + fd_signal_filt_padded
+    summed_sub_pulses_fd = summed_sub_pulses_fd + fd_signal_padded_shifted
 
-    plt.plot(fft_freqs / 1e6, np.abs(fd_signal))
-    plt.plot(fft_freqs / 1e6, np.abs(compressed_fd))
-    plt.plot(fft_freqs / 1e6, np.abs(fd_signal_filt))
-    # plt.plot(shifted_freqs / 1e6, np.abs(fd_signal_filt_padded))
+    # plt.plot(fft_freqs / 1e6, np.abs(fd_signal))
+    # plt.plot(fft_freqs_shifted / 1e6, np.abs(np.fft.fftshift(compressed_fd)), "--")
+    # plt.plot(fft_freqs_shifted / 1e6, window, "o")
+    # plt.plot(fft_freqs_shifted / 1e6, np.abs(fd_signal_filt), "--")
+    # plt.plot(padded_freqs / 1e6, np.abs(fd_signal_padded))
+    plt.plot(padded_freqs / 1e6, np.abs(fd_signal_padded_shifted))
 
 # 7. IFFT
-summed_sub_pulses_td = np.real(np.fft.ifft(summed_sub_pulses_fd))
+# window = windows.tukey(len(summed_sub_pulses_fd), alpha=0.01)
+summed_sub_pulses_td = np.real(np.fft.ifft(np.fft.ifftshift(summed_sub_pulses_fd)))
 
+plt.title("Stacked SWW")
 plt.legend(
     [
-        "f1 raw",
-        "f1 compressed",
-        "f1 filt",
-        "f2 raw",
-        "f2 compressed",
-        "f2 filt",
-        "f3 raw",
-        "f3 compressed",
-        "f3 filt",
-    ]
+        # "f1 raw",
+        # "f1 compressed",
+        # "filter",
+        # "f1 padded",
+        "f1 shifted",
+        "f2 shifted",
+        "f3 shifted",
+        # "f3 compressed",
+        # "f3 filt",
+    ],
+    loc="lower left",
 )
 plt.xlabel("Frequencies [MHz]")
 plt.grid()
 
 plt.figure()
-plt.title("Sum of frequency-domain pulses")
+plt.title("Synthetic wideband waveform")
 plt.plot(
-    # fft_freqs / 1e6,
+    padded_freqs / 1e6,
     np.abs(summed_sub_pulses_fd),
-    "--",
 )
-# plt.figure()
-# t = np.linspace(0, np.max(time_vector), len(summed_sub_pulses_td))
-# plt.plot(t, summed_sub_pulses_td)
-# plt.plot(time_vector, np.sum(recv_data_list, axis=0))
-# plt.grid()
-# plt.xlabel("Time")
-# plt.legend(["Reconstructed", "Sum of original signals"])
+plt.xlabel("Freq [MHz]")
+
+plt.figure()
+plt.title("Reconstructed time-domain scan")
+t = np.linspace(0, np.max(time_vector), len(summed_sub_pulses_td))
+plt.plot(t, summed_sub_pulses_td)
+plt.grid()
+plt.xlabel("Time")
 plt.show()
