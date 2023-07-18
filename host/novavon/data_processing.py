@@ -14,33 +14,68 @@ from scipy.io import loadmat
 
 # Data acqusition parameters
 data_from_file: bool = True
-sampling_rate: int = 20e6  # [Samples/second]
+condense_data: bool = True
+exclude_bad_data: bool = False
+sampling_rate: int = 25e6  # [Samples/second]
 chirp_bw: int = 10e6  # [Hz]
-chirp_duration: float = 50e-6  # [seconds]
-num_freqs: int = 3
-min_freq: int = 0.9e9
+chirp_duration: float = 3e-5  # [seconds]
+num_freqs: int = 20
+min_freq: int = 1.0e9
 max_freq: int = 1.2e9
 center_freqs: np.array = np.linspace(min_freq, max_freq, num_freqs, endpoint=True)
-data_filename = "./host/novavon/sample_data/2023-07-05_10-45_20e6_0-9_1-05_1-2.mat"
+data_filename = (
+    "/Users/hannah/Documents/Novavon/Test Data/Reflection1m_25MSps_20steppedChirps.mat"
+)
+# data_filename = "./host/novavon/sample_data/2023-07-05_10-45_20e6_0-9_1-05_1-2.mat"
 
 if data_from_file:
     data = loadmat(data_filename)
     print("Reading ", data["__header__"])
     recv_data_list = data["data"]
+
+    if condense_data:
+        duration_samples = int(chirp_duration * sampling_rate * 2)
+        recv_data_list_condensed = np.empty(
+            [num_freqs, 2 * duration_samples], dtype=np.complex64
+        )
+        for ii in range(num_freqs):
+            w = recv_data_list[ii]
+            peak_sample = np.argmax(np.abs(w))
+            start = peak_sample - duration_samples
+            stop = peak_sample + duration_samples
+            if start < 0:
+                start = 0
+            if stop >= len(w):
+                stop = len(w)
+            recv_data_list_condensed[ii] = w[start:stop]
+        recv_data_list = recv_data_list_condensed
+
     num_samples = recv_data_list.shape[1]
     assert recv_data_list.shape[0] == num_freqs
     time_vector = 1 / sampling_rate * np.linspace(0, num_samples, num=num_samples)
     dt = time_vector[1] - time_vector[0]
 
     # Plot time-domain data
-    legend_text = []
+    legend1_text = []
+    legend2_text = []
     plt.figure()
     for ii in range(num_freqs):
-        plt.plot(time_vector * 1e6, np.real(recv_data_list[ii]))
-        legend_text.append(f"signal {ii+1}")
+        if ii < num_freqs / 2:
+            plt.subplot(211)
+            legend1_text.append(f"signal {ii+1}")
+        else:
+            plt.subplot(212)
+            legend2_text.append(f"signal {ii+1}")
+        plt.plot(np.real(recv_data_list[ii]))
+        # plt.plot(time_vector * 1e6, np.real(recv_data_list[ii]))
+
     plt.title("Raw Time-Domain Data")
-    plt.xlabel("Time [us]")
-    plt.legend(legend_text)
+    plt.xlabel("Time [Samples]")
+    # plt.xlabel("Time [us]")
+    plt.legend(legend2_text)
+    plt.grid("True")
+    plt.subplot(211)
+    plt.legend(legend1_text)
     plt.grid("True")
 
 else:
@@ -66,43 +101,49 @@ else:
 # 5. Shift each sub-pulse to the proper center frequency (circshift)
 # 6. Sum the freq-domain sub-pulses
 # 7. IFFT
+
+# 0. Precompute some things
 reference_pulse = dc_chirp(1, chirp_bw, sampling_rate, chirp_duration)
-# reference_pulse = reference_pulse / max(reference_pulse)  # TODO: do we need this?
 fd_ref = np.fft.fft(reference_pulse, n=num_samples) / (len(reference_pulse) / 2.0)
+window = windows.tukey(num_samples, alpha=0.01)
 fft_freqs = np.fft.fftfreq(num_samples, d=dt)
-len_zero_padding = 2**22 - num_samples  # int(
-#     1000 * num_freqs * chirp_duration * sampling_rate
-# )
+fft_freqs_shifted = np.fft.fftshift(fft_freqs)
+len_zero_padding = 2**18 - num_samples
+df = fft_freqs[1] - fft_freqs[0]
+new_max_freq = np.max(fft_freqs) + len_zero_padding * df
+print("New max freq in MHz after padding:", np.max(new_max_freq) / 1e6)
+padded_freqs = np.linspace(
+    -1 * new_max_freq,
+    new_max_freq,
+    num=num_samples + 2 * len_zero_padding,
+    endpoint=False,
+)
 summed_sub_pulses_fd = np.empty([num_samples + 2 * len_zero_padding])
 plt.figure()
 for ii in range(num_freqs):
     # 1. Take FFT
     # TODO: do we need the normalization and dc-removal?
-    td_signal = recv_data_list[ii]  # / max(recv_data_list[ii])
+    td_signal = recv_data_list[ii] / np.max(recv_data_list[ii])
     # td_signal = td_signal - np.mean(td_signal)
     fd_signal = np.fft.fft(td_signal) / (len(td_signal) / 2.0)
+    print(ii + 1, np.mean(np.abs(fd_signal)))
+
+    if exclude_bad_data:
+        if np.mean(np.abs(fd_signal)) > 0.012 or np.mean(np.abs(fd_signal)) < 0.009:
+            continue
 
     # 2. Apply matched filter
     compressed_fd = fd_signal * np.conj(fd_ref)
 
     # 3. Filter with rectangular / tukey window
-    window = windows.tukey(num_samples, alpha=0.01)
     fd_signal_filt = np.fft.fftshift(compressed_fd) * window
 
     # 4. Zero-pad symmetrically about DC
-    fft_freqs_shifted = np.fft.fftshift(fft_freqs)
     fd_signal_padded = np.pad(
         fd_signal_filt,
-        # np.fft.fftshift(compressed_fd),
         len_zero_padding,
         "constant",
         constant_values=(0),
-    )
-    df = fft_freqs[1] - fft_freqs[0]
-    new_max_freq = np.max(fft_freqs) + len_zero_padding * df
-    print("New max freq in MHz after padding:", np.max(new_max_freq) / 1e6)
-    padded_freqs = np.linspace(
-        -1 * new_max_freq, new_max_freq, num=len(fd_signal_padded), endpoint=False
     )
 
     # 5. Frequency-shift to correct center freq
@@ -124,35 +165,26 @@ for ii in range(num_freqs):
 summed_sub_pulses_td = np.real(np.fft.ifft(np.fft.ifftshift(summed_sub_pulses_fd)))
 
 plt.title("Stacked SWW")
-plt.legend(
-    [
-        # "f1 raw",
-        # "f1 compressed",
-        # "filter",
-        # "f1 padded",
-        "f1 shifted",
-        "f2 shifted",
-        "f3 shifted",
-        # "f3 compressed",
-        # "f3 filt",
-    ],
-    loc="lower left",
-)
 plt.xlabel("Frequencies [MHz]")
+plt.xlim((min_freq - chirp_bw) / 1e6, (max_freq + chirp_bw) / 1e6)
 plt.grid()
 
 plt.figure()
 plt.title("Synthetic wideband waveform")
 plt.plot(
-    padded_freqs / 1e6,
+    padded_freqs,
     np.abs(summed_sub_pulses_fd),
 )
-plt.xlabel("Freq [MHz]")
+plt.xlim(min_freq - chirp_bw, max_freq + chirp_bw)
+plt.xlabel("Freq [Hz]")
+plt.grid()
+
 
 plt.figure()
-plt.title("Reconstructed time-domain scan")
-t = np.linspace(0, np.max(time_vector), len(summed_sub_pulses_td))
-plt.plot(t, summed_sub_pulses_td)
+plt.title("Reconstructed A-scan")
+wave_speed = 3e8  # [m/s]
+d = wave_speed * np.arange(0, len(summed_sub_pulses_td) * dt, step=dt)
+plt.plot(d, summed_sub_pulses_td)
 plt.grid()
-plt.xlabel("Time")
+plt.xlabel("Range [m]")
 plt.show()
