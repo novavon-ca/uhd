@@ -79,22 +79,22 @@ def rx_worker(usrp, streamer, metadata, rx_data, verbose=False):
 
 def main():
     # Settings from user - these will come from the command line or a JSON file
-    min_freq: int = 0.9e9  # [Hz]
+    min_freq: int = 1.0e9  # [Hz]
     max_freq: int = 1.2e9  # [Hz]
-    num_freqs: int = 3
+    num_freqs: int = 20
     chirp_bw: int = 10e6  # [Hz]
-    chirp_duration: int = 5e-5  # [seconds]
-    output_filename: str = ""  # "2023-07-05_10-45_20e6_0-9_1-05_0-2"  # set to empty string to not save data to file
+    chirp_duration: int = 3e-5  # [seconds]
+    output_filename: str = "Reflection5m_25MSps_20steppedChirps"  # "2023-07-05_10-45_20e6_0-9_1-05_0-2"  # set to empty string to not save data to file
     verbose: bool = False
 
     # Settings the user will not have access to
     sampling_rate: int = 25e6  # samples per second
     chirp_ampl: float = 0.3  # float between 0 and 1
-    tx_gain: int = 55  # [dB]
+    tx_gain: int = 50  # [dB]
     rx_gain: int = 50  # [dB]
-    rx_samples: int = 100000
+    rx_samples: int = 200000
     rx_auto_gain: bool = False
-    plot_data: bool = True
+    plot_data: bool = False
 
     # Validate input args
     center_freqs = np.linspace(min_freq, max_freq, num_freqs, endpoint=True)
