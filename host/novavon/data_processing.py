@@ -13,15 +13,15 @@ from waveforms import dc_chirp
 from scipy.io import loadmat
 
 # Data acqusition parameters
-data_from_file: bool = True
-condense_data: bool = True
+data_from_file: bool = False
+condense_data: bool = False
 exclude_bad_data: bool = False
 sampling_rate: int = 25e6  # [Samples/second]
 chirp_bw: int = 10e6  # [Hz]
 chirp_duration: float = 3e-5  # [seconds]
 num_freqs: int = 20
-min_freq: int = 1.0e9
-max_freq: int = 1.2e9
+min_freq: int = 1.0e9 + chirp_bw / 2
+max_freq: int = 1.2e9 - chirp_bw / 2
 center_freqs: np.array = np.linspace(min_freq, max_freq, num_freqs, endpoint=True)
 data_filename = (
     "/Users/hannah/Documents/Novavon/Test Data/Reflection1m_25MSps_20steppedChirps.mat"
@@ -79,18 +79,28 @@ if data_from_file:
     plt.grid("True")
 
 else:
-    # Create some dummy data so we have something to play with
-    # TODO: add noise to distort each chirp
-    num_tx_samples: int = int(sampling_rate * chirp_duration)
+    # Generate some dummy data
+    zero_pad = True
+    if zero_pad:
+        num_samples = 2040
+    else:
+        num_samples: int = int(sampling_rate * chirp_duration)
     recv_data_list = []
-    time_vector = np.linspace(0, chirp_duration, num=num_tx_samples)
-    dt = time_vector[1] - time_vector[0]
+    # time_vector = np.linspace(0, chirp_duration, num=num_samples)
     plt.figure()
     for ii, freq in enumerate(center_freqs):
-        data_buffer = dc_chirp(0.3, chirp_bw, sampling_rate, chirp_duration, pad=False)
+        data_buffer, time_vector = dc_chirp(
+            1,
+            chirp_bw,
+            sampling_rate,
+            chirp_duration,
+            pad=zero_pad,
+            ret_time_samples=True,
+        )
         # data_buffer = np.sin(2 * np.pi * freq * time_vector, dtype=np.complex64)
         recv_data_list.append(data_buffer)
         plt.plot(time_vector, recv_data_list[ii])
+    dt = time_vector[1] - time_vector[0]
     plt.xlabel("Time")
 
 # Frequency-stacking algorithm:
@@ -158,7 +168,7 @@ for ii in range(num_freqs):
     # plt.plot(fft_freqs_shifted / 1e6, window, "o")
     # plt.plot(fft_freqs_shifted / 1e6, np.abs(fd_signal_filt), "--")
     # plt.plot(padded_freqs / 1e6, np.abs(fd_signal_padded))
-    plt.plot(padded_freqs / 1e6, np.abs(fd_signal_padded_shifted))
+    plt.plot(padded_freqs / 1e6, 20 * np.log10(np.abs(fd_signal_padded_shifted)))
 
 # 7. IFFT
 # window = windows.tukey(len(summed_sub_pulses_fd), alpha=0.01)
@@ -166,17 +176,19 @@ summed_sub_pulses_td = np.real(np.fft.ifft(np.fft.ifftshift(summed_sub_pulses_fd
 
 plt.title("Stacked SWW")
 plt.xlabel("Frequencies [MHz]")
-plt.xlim((min_freq - chirp_bw) / 1e6, (max_freq + chirp_bw) / 1e6)
+plt.ylabel("Magnitude [dB]")
+# plt.xlim((min_freq - 10 * chirp_bw) / 1e6, (max_freq + 10 * chirp_bw) / 1e6)
 plt.grid()
 
 plt.figure()
 plt.title("Synthetic wideband waveform")
 plt.plot(
     padded_freqs,
-    np.abs(summed_sub_pulses_fd),
+    20 * np.log10(np.abs(summed_sub_pulses_fd)),
 )
-plt.xlim(min_freq - chirp_bw, max_freq + chirp_bw)
+# plt.xlim(min_freq - 10 * chirp_bw, max_freq + 10 * chirp_bw)
 plt.xlabel("Freq [Hz]")
+plt.ylabel("Magnitude [dB]")
 plt.grid()
 
 
