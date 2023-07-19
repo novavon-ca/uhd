@@ -191,18 +191,17 @@ def main():
     success = False
 
     args: dict[str, Any] = {
-        "output_filename": "",  # set to empty string to not save data to file
-        "center_freq": 1e9,
-        "sampling_rate": 50e6,  # samples per second
-        "chirp_bw": 5e6,
+        "center_freq": 2.5e9,
+        "sampling_rate": 25e6,  # samples per second
+        "chirp_bw": 10e6,
         "chirp_ampl": 0.3,  # float between 0 and 1
         "chirp_duration": 3e-5,
         "tx_gain": 50,  # [dB]
-        "rx_samples": 100000,
+        "rx_samples": 80000,
         "rx_antenna": "RX2",  # "RX2" or "TX/RX"
         "rx_gain": 50,  # [dB]
         "rx_auto_gain": False,
-        "output_filename": "",  # set to empty string to not save data to file
+        "output_filename": "Monostatic_Reflection5m_25MSps_2pt5GHz_rep2",  # set to empty string to not save data to file
         "plot_data": True,
         "verbose": True,
     }
