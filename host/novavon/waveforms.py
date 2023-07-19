@@ -58,18 +58,29 @@ if __name__ == "__main__":
     ampl = 0.3
     wave_freq = 1e4
     sine_rate = 1e6
-    chirp_rate = 50e6
-    chirp_bw = 8e6  # (2e9 - 800e6) / 2
+    chirp_rate = 25e6
+    chirp_bw = 10e6  # (2e9 - 800e6) / 2
     chirp_duration = 3e-5  # [seconds]
 
-    w1, t1 = sine(ampl, wave_freq, sine_rate, ret_time_samples=True)
+    # w1, t1 = sine(ampl, wave_freq, sine_rate, ret_time_samples=True)
 
     # t = 1/fs * np.arange(0, num_samples)
     # waveform = scipy_chirp(t, f0=800e6, f1=2e9, t1=t[-100], method='linear')
 
     # w2, t2 = chirp(5e9, 5e5, 800e6, 2e9, ret_time_samples=True)
+    w1, t1 = dc_chirp(
+        ampl,
+        chirp_bw,
+        chirp_rate,
+        chirp_duration,
+        pad=False,
+        ret_time_samples=True,
+    )
     w2, t2 = dc_chirp(
-        ampl, chirp_bw, chirp_rate, chirp_duration, pad=True, ret_time_samples=True
+        ampl, chirp_bw, chirp_rate, chirp_duration / 2, pad=False, ret_time_samples=True
+    )
+    w3, t3 = dc_chirp(
+        ampl, chirp_bw, chirp_rate, chirp_duration / 3, pad=False, ret_time_samples=True
     )
 
     # plt.figure(1)
@@ -84,14 +95,22 @@ if __name__ == "__main__":
     # plt.xlabel("Freq [MHz]")
 
     plt.figure(3)
+    plt.plot(t1, np.real(w1))
     plt.plot(t2, np.real(w2))
-    plt.plot(t2, np.imag(w2))
+    plt.plot(t3, np.real(w3))
+    # plt.plot(t2, np.imag(w2))
     plt.xlabel("Time [s]")
 
     plt.figure(4)
+    w1_fd = np.fft.fft(w1)
     w2_fd = np.fft.fft(w2)
-    freqs = np.fft.fftfreq(len(w2_fd), d=t2[1] - t2[0])
-    plt.plot(freqs / 1e6, np.abs(w2_fd))
+    w3_fd = np.fft.fft(w3)
+    f1 = np.fft.fftfreq(len(w1_fd), d=t1[1] - t1[0])
+    f2 = np.fft.fftfreq(len(w2_fd), d=t2[1] - t2[0])
+    f3 = np.fft.fftfreq(len(w3_fd), d=t3[1] - t3[0])
+    plt.plot(f1 / 1e6, np.abs(w1_fd))
+    plt.plot(f2 / 1e6, np.abs(w2_fd))
+    plt.plot(f3 / 1e6, np.abs(w3_fd))
     plt.xlabel("Freq [MHz]")
     plt.show()
 
