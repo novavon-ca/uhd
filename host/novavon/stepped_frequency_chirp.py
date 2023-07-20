@@ -79,22 +79,22 @@ def rx_worker(usrp, streamer, metadata, rx_data, verbose=False):
 
 def main():
     # Settings from user - these will come from the command line or a JSON file
-    chirp_bw: int = 10e6  # [Hz]
+    chirp_bw: int = 8e6  # [Hz]
     chirp_duration: int = 1e-5  # [seconds]
-    min_freq: int = 1.0e9 + chirp_bw/2  # [Hz]
-    max_freq: int = 1.05e9 - chirp_bw /2 # [Hz]
-    num_freqs: int = 5
-    output_filename: str = "Loopback_25MSps_5Chirps_1000-1050MHZ_b"  # "2023-07-05_10-45_20e6_0-9_1-05_0-2"  # set to empty string to not save data to file
+    min_freq: int = 2.8e9 + chirp_bw/2  # [Hz]
+    max_freq: int = 2.96e9 - chirp_bw /2 # [Hz]
+    num_freqs: int = 20
+    output_filename: str = "EILp4_newPCBAnt_monostatic_powerAmp_20chirps_2800-2960MHz_25MSps_A"  # "2023-07-05_10-45_20e6_0-9_1-05_0-2"  # set to empty string to not save data to file
     verbose: bool = False
 
     # Settings the user will not have access to
     sampling_rate: int = 25e6  # samples per second
     chirp_ampl: float = 0.3  # float between 0 and 1
-    tx_gain: int = 50  # [dB]
-    rx_gain: int = 50  # [dB]
-    rx_samples: int = 80000
+    tx_gain: int = 40  # [dB]
+    rx_gain: int = 40  # [dB]
+    rx_samples: int = 150000
     rx_auto_gain: bool = False
-    plot_data: bool = True
+    plot_data: bool = False
 
     # Validate input args
     center_freqs = np.linspace(min_freq, max_freq, num_freqs, endpoint=True)
