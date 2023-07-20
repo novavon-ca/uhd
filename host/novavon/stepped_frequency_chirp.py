@@ -95,6 +95,7 @@ def main():
     rx_samples: int = 150000
     rx_auto_gain: bool = False
     plot_data: bool = False
+    num_averages: int = 20
 
     # Validate input args
     center_freqs = np.linspace(min_freq, max_freq, num_freqs, endpoint=True)
@@ -127,14 +128,22 @@ def main():
     recv_data_list = []
     for freq_idx, frequency in enumerate(center_freqs):
         # Create tx and rx threads
-        recv_data = np.zeros(
+        recv_data_buff = np.zeros(
             [
                 rx_samples,
             ],
             dtype=np.complex64,
         )
+        recv_data_for_freq = np.zeros(
+            [
+                num_averages,
+                rx_samples,
+            ],
+            dtype=np.complex64,
+        )
+
         rx_thread = threading.Thread(
-            target=rx_worker, args=(usrp, rx_streamer, rx_metadata, recv_data, verbose)
+            target=rx_worker, args=(usrp, rx_streamer, rx_metadata, recv_data_buff, verbose)
         )
         tx_thread = threading.Thread(
             target=tx_worker, args=(tx_streamer, tx_metadata, tx_buffer, verbose)
@@ -147,13 +156,15 @@ def main():
         logger.info(
             f"Acquiring data at {frequency/1e9}GHz: center freq {freq_idx+1}/{num_freqs}..."
         )
-
-        rx_thread.start()
-        tx_thread.start()
-        rx_thread.join()
-        tx_thread.join()
-
-        recv_data_list.append(recv_data)
+        for jj in range(num_averages):
+            rx_thread.start()
+            tx_thread.start()
+            rx_thread.join()
+            tx_thread.join()
+            recv_data_for_freq[jj, :] = recv_data_buff 
+            
+        # @todo: align and sum signals before saving?
+        recv_data_list.append(recv_data_for_freq)
 
     logger.info("Acquisition complete!")
 
