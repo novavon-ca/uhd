@@ -80,11 +80,11 @@ def rx_worker(usrp, streamer, metadata, rx_data, verbose=False):
 def main():
     # Settings from user - these will come from the command line or a JSON file
     chirp_bw: int = 8e6  # [Hz]
-    chirp_duration: int = 1e-5  # [seconds]
+    chirp_duration: int = 5.025e-5  # [seconds]
     min_freq: int = 2.8e9 + chirp_bw/2  # [Hz]
     max_freq: int = 2.96e9 - chirp_bw /2 # [Hz]
-    num_freqs: int = 20
-    output_filename: str = "EILp4_newPCBAnt_monostatic_powerAmp_20chirps_2800-2960MHz_25MSps_A"  # "2023-07-05_10-45_20e6_0-9_1-05_0-2"  # set to empty string to not save data to file
+    num_freqs: int = 2
+    output_filename: str = "Test"  # "2023-07-05_10-45_20e6_0-9_1-05_0-2"  # set to empty string to not save data to file
     verbose: bool = False
 
     # Settings the user will not have access to
@@ -92,10 +92,10 @@ def main():
     chirp_ampl: float = 0.3  # float between 0 and 1
     tx_gain: int = 40  # [dB]
     rx_gain: int = 40  # [dB]
-    rx_samples: int = 150000
-    rx_auto_gain: bool = False
-    plot_data: bool = False
-    num_averages: int = 20
+    rx_samples: int = 100000
+    rx_auto_gain: bool = True
+    plot_data: bool = True
+    num_averages: int = 1
 
     # Validate input args
     center_freqs = np.linspace(min_freq, max_freq, num_freqs, endpoint=True)
@@ -118,7 +118,7 @@ def main():
     # Set up transmit and receive streamers
     tx_streamer, rx_streamer, tx_metadata, rx_metadata = setup_streamers(usrp)
     tx_buffer, t = dc_chirp(
-        chirp_ampl, chirp_bw, sampling_rate, chirp_duration, ret_time_samples=True
+        chirp_ampl, chirp_bw, sampling_rate, chirp_duration, ret_time_samples=True, pad=True
     )
     if len(tx_buffer.shape) == 1:
         tx_buffer = tx_buffer.reshape(1, tx_buffer.size)
@@ -178,12 +178,13 @@ def main():
             logger.info("Plotting received data...")
 
         legend_text = ["Tx"]
-        time_vec_rx = 1 / sampling_rate * np.arange(0, len(recv_data_list[0]))
+        time_vec_rx = 1 / sampling_rate * np.arange(0, len(recv_data_list[0][0,:]))
         plt.figure()
         plt.plot(t * 1e6, np.real(tx_buffer[0, :]))
         for ii in range(num_freqs):
-            plt.plot(time_vec_rx * 1e6, np.real(recv_data_list[ii]))
-            legend_text.append(f"Rx {ii+1}")
+            for jj in range(num_averages):
+                plt.plot(time_vec_rx * 1e6, np.real(recv_data_list[ii][jj,:]))
+                legend_text.append(f"Rx {ii+1}, rep{jj+1}")
         plt.title("Baseband signals")
         plt.xlabel("Time [us]")
         plt.legend(legend_text)
