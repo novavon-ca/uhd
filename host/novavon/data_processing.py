@@ -13,20 +13,20 @@ from waveforms import dc_chirp
 from scipy.io import loadmat
 
 # Data acqusition parameters
-data_from_file: bool = False
-condense_data: bool = False
+data_from_file: bool = True
+condense_data: bool = True
 exclude_bad_data: bool = False
 sampling_rate: int = 25e6  # [Samples/second]
 chirp_bw: int = 10e6  # [Hz]
-chirp_duration: float = 3e-5  # [seconds]
-num_freqs: int = 20
+chirp_duration: float = 1e-5  # [seconds]
+num_freqs: int = 5
 min_freq: int = 1.0e9 + chirp_bw / 2
-max_freq: int = 1.2e9 - chirp_bw / 2
+max_freq: int = 1.05e9 - chirp_bw / 2
 center_freqs: np.array = np.linspace(min_freq, max_freq, num_freqs, endpoint=True)
-data_filename = (
-    "/Users/hannah/Documents/Novavon/Test Data/Reflection1m_25MSps_20steppedChirps.mat"
-)
-# data_filename = "./host/novavon/sample_data/2023-07-05_10-45_20e6_0-9_1-05_1-2.mat"
+# data_filename = (
+#     "/Users/hannah/Documents/Novavon/Test Data/Reflection1m_25MSps_20steppedChirps.mat"
+# )
+data_filename = "./host/novavon/sample_data/Loopback_25MSps_5Chirps_1000-1050MHZ_b.mat"
 
 if data_from_file:
     data = loadmat(data_filename)
@@ -66,12 +66,12 @@ if data_from_file:
         else:
             plt.subplot(212)
             legend2_text.append(f"signal {ii+1}")
-        plt.plot(np.real(recv_data_list[ii]))
-        # plt.plot(time_vector * 1e6, np.real(recv_data_list[ii]))
+        # plt.plot(np.real(recv_data_list[ii]))
+        plt.plot(time_vector * 1e6, np.real(recv_data_list[ii]))
 
     plt.title("Raw Time-Domain Data")
-    plt.xlabel("Time [Samples]")
-    # plt.xlabel("Time [us]")
+    # plt.xlabel("Time [Samples]")
+    plt.xlabel("Time [us]")
     plt.legend(legend2_text)
     plt.grid("True")
     plt.subplot(211)
@@ -80,7 +80,7 @@ if data_from_file:
 
 else:
     # Generate some dummy data
-    zero_pad = True
+    zero_pad = False
     if zero_pad:
         num_samples = 2040
     else:
@@ -115,9 +115,10 @@ else:
 # 0. Precompute some things
 reference_pulse = dc_chirp(1, chirp_bw, sampling_rate, chirp_duration)
 fd_ref = np.fft.fft(reference_pulse, n=num_samples) / (len(reference_pulse) / 2.0)
-window = windows.tukey(num_samples, alpha=0.01)
 fft_freqs = np.fft.fftfreq(num_samples, d=dt)
 fft_freqs_shifted = np.fft.fftshift(fft_freqs)
+rect_bw = chirp_bw * 1.5
+rect_window = np.where(np.abs(fft_freqs_shifted) <= rect_bw/2, 1, 0)
 len_zero_padding = 2**18 - num_samples
 df = fft_freqs[1] - fft_freqs[0]
 new_max_freq = np.max(fft_freqs) + len_zero_padding * df
@@ -136,7 +137,7 @@ for ii in range(num_freqs):
     td_signal = recv_data_list[ii] / np.max(recv_data_list[ii])
     # td_signal = td_signal - np.mean(td_signal)
     fd_signal = np.fft.fft(td_signal) / (len(td_signal) / 2.0)
-    print(ii + 1, np.mean(np.abs(fd_signal)))
+    # print(ii + 1, np.mean(np.abs(fd_signal)))
 
     if exclude_bad_data:
         if np.mean(np.abs(fd_signal)) > 0.012 or np.mean(np.abs(fd_signal)) < 0.009:
@@ -146,7 +147,7 @@ for ii in range(num_freqs):
     compressed_fd = fd_signal * np.conj(fd_ref)
 
     # 3. Filter with rectangular / tukey window
-    fd_signal_filt = np.fft.fftshift(compressed_fd) * window
+    fd_signal_filt = np.fft.fftshift(compressed_fd) * rect_window
 
     # 4. Zero-pad symmetrically about DC
     fd_signal_padded = np.pad(
@@ -171,8 +172,8 @@ for ii in range(num_freqs):
     plt.plot(padded_freqs / 1e6, 20 * np.log10(np.abs(fd_signal_padded_shifted)))
 
 # 7. IFFT
-# window = windows.tukey(len(summed_sub_pulses_fd), alpha=0.01)
-summed_sub_pulses_td = np.real(np.fft.ifft(np.fft.ifftshift(summed_sub_pulses_fd)))
+window = windows.tukey(len(summed_sub_pulses_fd), alpha=0.01)
+summed_sub_pulses_td = np.real(np.fft.ifft(np.fft.ifftshift(summed_sub_pulses_fd)*window))
 
 plt.title("Stacked SWW")
 plt.xlabel("Frequencies [MHz]")
@@ -195,7 +196,8 @@ plt.grid()
 plt.figure()
 plt.title("Reconstructed A-scan")
 wave_speed = 3e8  # [m/s]
-d = wave_speed * np.arange(0, len(summed_sub_pulses_td) * dt, step=dt)
+padded_dt = 1 / (2 * np.max(padded_freqs))
+d = wave_speed * padded_dt * np.arange(len(summed_sub_pulses_td))
 plt.plot(d, summed_sub_pulses_td)
 plt.grid()
 plt.xlabel("Range [m]")
