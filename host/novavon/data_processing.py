@@ -128,7 +128,9 @@ padded_freqs = np.linspace(
     num=num_samples + 2 * len_zero_padding,
     endpoint=False,
 )
-summed_sub_pulses_fd = np.empty([num_samples + 2 * len_zero_padding])
+summed_sub_pulses_fd = np.zeros(
+    [num_samples + 2 * len_zero_padding], dtype=np.complex64
+)
 plt.figure()
 for ii in range(num_freqs):
     # 1. Take FFT
