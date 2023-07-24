@@ -8,24 +8,24 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.signal import windows
+from scipy.signal import windows, hilbert
 from waveforms import dc_chirp
 from scipy.io import loadmat
 
 # Data acqusition parameters
-data_from_file: bool = False
-condense_data: bool = False
-exclude_bad_data: bool = False
+data_from_file: bool = True
+condense_data: bool = True
 sampling_rate: int = 25e6  # [Samples/second]
-chirp_bw: int = 10e6  # [Hz]
-chirp_duration: float = 3e-5  # [seconds]
-num_freqs: int = 20
-min_freq: int = 1.0e9 + chirp_bw / 2
-max_freq: int = 1.2e9 - chirp_bw / 2
+chirp_bw: int = 8e6  # [Hz]
+chirp_duration: float = 1e-5  # [seconds]
+num_freqs: int = 10
+min_freq: int = 2.0e9 + chirp_bw / 2
+max_freq: int = 2.08e9 - chirp_bw / 2
 center_freqs: np.array = np.linspace(min_freq, max_freq, num_freqs, endpoint=True)
-data_filename = (
-    "/Users/hannah/Documents/Novavon/Test Data/Reflection1m_25MSps_20steppedChirps.mat"
-)
+# data_filename = "/Users/hannah/Documents/Novavon/Test Data/DoorThenWoodThenMetal/3reflectors_newPCBAnt_monostatic_powerAmp_10chirps_2000-2080MHz_25MSps_B.mat"
+data_filename = "/Users/hannah/Documents/Novavon/Test Data/WoodThenMetalReflectors/newPCBAnt_monostatic_powerAmp_10chirps_2000-2080MHz_25MSps_B.mat"
+# data_filename = "/Users/hannah/Documents/Novavon/Test Data/SingleMetalPlateReflector/Reflection1m_25MSps_20steppedChirps.mat"
+
 # data_filename = "./host/novavon/sample_data/2023-07-05_10-45_20e6_0-9_1-05_1-2.mat"
 
 if data_from_file:
@@ -34,15 +34,18 @@ if data_from_file:
     recv_data_list = data["data"]
 
     if condense_data:
-        duration_samples = int(chirp_duration * sampling_rate * 2)
+        duration_samples = int(chirp_duration * sampling_rate * 1.1)
         recv_data_list_condensed = np.empty(
-            [num_freqs, 2 * duration_samples], dtype=np.complex64
+            [num_freqs, duration_samples], dtype=np.complex64
         )
         for ii in range(num_freqs):
             w = recv_data_list[ii]
             peak_sample = np.argmax(np.abs(w))
             start = peak_sample - duration_samples
-            stop = peak_sample + duration_samples
+            stop = start + duration_samples
+            toa = np.where(np.abs(w[start:stop]) >= np.max(np.abs(w[start:stop])) / 4)
+            start = start + toa[0][0]
+            stop = start + duration_samples
             if start < 0:
                 start = 0
             if stop >= len(w):
@@ -80,7 +83,7 @@ if data_from_file:
 
 else:
     # Generate some dummy data
-    zero_pad = True
+    zero_pad = False
     if zero_pad:
         num_samples = 2040
     else:
@@ -115,9 +118,10 @@ else:
 # 0. Precompute some things
 reference_pulse = dc_chirp(1, chirp_bw, sampling_rate, chirp_duration)
 fd_ref = np.fft.fft(reference_pulse, n=num_samples) / (len(reference_pulse) / 2.0)
-window = windows.tukey(num_samples, alpha=0.01)
 fft_freqs = np.fft.fftfreq(num_samples, d=dt)
 fft_freqs_shifted = np.fft.fftshift(fft_freqs)
+rect_bw = chirp_bw * 1.5
+rect_window = np.where(np.abs(fft_freqs_shifted) <= rect_bw / 2, 1, 0)
 len_zero_padding = 2**18 - num_samples
 df = fft_freqs[1] - fft_freqs[0]
 new_max_freq = np.max(fft_freqs) + len_zero_padding * df
@@ -131,24 +135,24 @@ padded_freqs = np.linspace(
 summed_sub_pulses_fd = np.zeros(
     [num_samples + 2 * len_zero_padding], dtype=np.complex64
 )
+summed_sub_pulses_fd_ref = summed_sub_pulses_fd
 plt.figure()
 for ii in range(num_freqs):
+    # if ii == 3 or ii == 37:
+    #     continue
     # 1. Take FFT
     # TODO: do we need the normalization and dc-removal?
     td_signal = recv_data_list[ii] / np.max(recv_data_list[ii])
     # td_signal = td_signal - np.mean(td_signal)
     fd_signal = np.fft.fft(td_signal) / (len(td_signal) / 2.0)
-    print(ii + 1, np.mean(np.abs(fd_signal)))
-
-    if exclude_bad_data:
-        if np.mean(np.abs(fd_signal)) > 0.012 or np.mean(np.abs(fd_signal)) < 0.009:
-            continue
 
     # 2. Apply matched filter
     compressed_fd = fd_signal * np.conj(fd_ref)
+    compressed_fd_ref = fd_ref * np.conj(fd_ref)
 
     # 3. Filter with rectangular / tukey window
-    fd_signal_filt = np.fft.fftshift(compressed_fd) * window
+    fd_signal_filt = np.fft.fftshift(compressed_fd) * rect_window
+    fd_ref_filt = np.fft.fftshift(compressed_fd_ref) * rect_window
 
     # 4. Zero-pad symmetrically about DC
     fd_signal_padded = np.pad(
@@ -157,13 +161,21 @@ for ii in range(num_freqs):
         "constant",
         constant_values=(0),
     )
+    fd_ref_padded = np.pad(
+        fd_ref_filt,
+        len_zero_padding,
+        "constant",
+        constant_values=(0),
+    )
 
     # 5. Frequency-shift to correct center freq
     shift = np.argmin(np.abs(np.fft.ifftshift(padded_freqs) - center_freqs[ii]))
     fd_signal_padded_shifted = np.roll(fd_signal_padded, shift)
+    fd_ref_padded_shifted = np.roll(fd_ref_padded, shift)
 
     # 6. Sum sub-pulses
     summed_sub_pulses_fd = summed_sub_pulses_fd + fd_signal_padded_shifted
+    summed_sub_pulses_fd_ref = summed_sub_pulses_fd_ref + fd_ref_padded_shifted
 
     # plt.plot(fft_freqs / 1e6, np.abs(fd_signal))
     # plt.plot(fft_freqs_shifted / 1e6, np.abs(np.fft.fftshift(compressed_fd)), "--")
@@ -172,8 +184,48 @@ for ii in range(num_freqs):
     # plt.plot(padded_freqs / 1e6, np.abs(fd_signal_padded))
     plt.plot(padded_freqs / 1e6, 20 * np.log10(np.abs(fd_signal_padded_shifted)))
 
-# 7. IFFT
+# 7. GLS Filter
+padded_df = 2 * np.max(padded_freqs)
+td_ideal_chirp, t_ideal = dc_chirp(
+    1,
+    max_freq - min_freq + chirp_bw,
+    padded_df,
+    len(padded_freqs) / padded_df,
+    ret_time_samples=True,
+)
+wb_chirp_freqs = np.fft.fftshift(
+    np.fft.fftfreq(len(td_ideal_chirp), t_ideal[1] - t_ideal[0])
+)
+ideal_wb_chirp_dc = np.fft.fftshift(np.fft.fft(td_ideal_chirp)) / len(td_ideal_chirp)
+shift = np.argmin(
+    np.abs(np.fft.ifftshift(wb_chirp_freqs) - ((min_freq + max_freq) / 2))
+)
+ideal_wb_chirp = np.roll(ideal_wb_chirp_dc, shift)
+# plt.plot(wb_chirp_freqs, np.abs(ideal_wb_chirp), "--")
+# plt.plot(padded_freqs, np.abs(summed_sub_pulses_fd_ref), "--")
+# plt.xlabel("Freqs [Hz]")
+gls_filter = np.where(
+    np.abs(summed_sub_pulses_fd_ref) > 0,
+    ideal_wb_chirp / summed_sub_pulses_fd_ref,
+    0,
+)
+rect = (
+    -1
+    + np.where(np.abs(padded_freqs) <= max_freq + chirp_bw / 2, 1, 0)
+    + np.where(np.abs(padded_freqs) >= min_freq - chirp_bw / 2, 1, 0)
+)
+tukey = windows.tukey(len(rect), 0.5)
+gls_filter = gls_filter * rect / np.max(gls_filter * rect)
+summed_sub_pulses_fd_gls = tukey * gls_filter * (summed_sub_pulses_fd)
+# plt.plot(padded_freqs, np.abs(gls_filter))
+# plt.plot(padded_freqs, np.abs(summed_sub_pulses_fd_gls))
+
+
+# 8. IFFT
 # window = windows.tukey(len(summed_sub_pulses_fd), alpha=0.01)
+summed_sub_pulses_td_gls = np.real(
+    np.fft.ifft(np.fft.ifftshift(summed_sub_pulses_fd_gls))
+)
 summed_sub_pulses_td = np.real(np.fft.ifft(np.fft.ifftshift(summed_sub_pulses_fd)))
 
 plt.title("Stacked SWW")
@@ -188,17 +240,46 @@ plt.plot(
     padded_freqs,
     20 * np.log10(np.abs(summed_sub_pulses_fd)),
 )
+plt.plot(
+    padded_freqs,
+    20 * np.log10(np.abs(gls_filter)),
+)
+plt.plot(
+    padded_freqs,
+    20 * np.log10(np.abs(summed_sub_pulses_fd_gls)),
+)
 # plt.xlim(min_freq - 10 * chirp_bw, max_freq + 10 * chirp_bw)
+plt.legend(["Before GLS", "GLS Filter", "After GLS"])
 plt.xlabel("Freq [Hz]")
-plt.ylabel("Magnitude [dB]")
+# plt.ylabel("Magnitude [dB]")
 plt.grid()
 
 
 plt.figure()
 plt.title("Reconstructed A-scan")
 wave_speed = 3e8  # [m/s]
-d = wave_speed * np.arange(0, len(summed_sub_pulses_td) * dt, step=dt)
-plt.plot(d, summed_sub_pulses_td)
+padded_dt = 1 / (2 * np.max(padded_freqs))
+d = wave_speed * padded_dt * np.arange(len(summed_sub_pulses_td))
+envelope = np.abs(
+    hilbert(np.real(summed_sub_pulses_td) / np.max(np.real(summed_sub_pulses_td)))
+)
+envelope_gls = np.abs(
+    hilbert(
+        np.real(summed_sub_pulses_td_gls) / np.max(np.real(summed_sub_pulses_td_gls))
+    )
+)
+plt.plot(
+    d,
+    20 * np.log10(envelope),
+)
+plt.plot(
+    d,
+    20 * np.log10(envelope_gls),
+)
+plt.xlim(0, 50)
+plt.ylim(-40, 0)
 plt.grid()
+plt.legend(["Before GLS", "After GLS"])
 plt.xlabel("Range [m]")
+plt.ylabel("Magnitude [dB]")
 plt.show()
