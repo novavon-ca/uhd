@@ -159,7 +159,21 @@ def main():
 
     if len(output_filename):
         logger.info("Saving to file...")
-        savemat(output_filename, {"data": recv_data_list})
+        savemat(
+            output_filename,
+            {
+                "data": recv_data_list,
+                "metadata": {
+                    "center_freqs": center_freqs,
+                    "chirp_bw": chirp_bw,
+                    "chirp_duration": chirp_duration,
+                    "rx_auto_gain_flag": rx_auto_gain,
+                    "rx_gain": rx_gain,
+                    "sampling_rate": sampling_rate,
+                    "tx_gain": tx_gain,
+                },
+            },
+        )
         logger.info(f"Data written to {output_filename}")
 
     if plot_data:
