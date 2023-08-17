@@ -11,7 +11,7 @@ from scipy.io import savemat
 from utilities import LogFormatter, validate_args
 from waveforms import dc_chirp
 from usrp_settings import usrp_setup, setup_streamers
-
+from controls import open_port, wait_for_start
 
 def tune_center_freq(usrp, center_freq):
     usrp.set_tx_freq(uhd.libpyuhd.types.tune_request(center_freq, 0))
@@ -80,11 +80,11 @@ def rx_worker(usrp, streamer, metadata, rx_data, verbose=False):
 def main():
     # Settings from user - these will come from the command line or a JSON file
     chirp_bw: int = 8e6  # [Hz]
-    chirp_duration: int = 5.025e-5  # [seconds]
+    chirp_duration: int = 1.025e-5  # [seconds]
     min_freq: int = 2.8e9 + chirp_bw/2  # [Hz]
     max_freq: int = 2.96e9 - chirp_bw /2 # [Hz]
     num_freqs: int = 2
-    output_filename: str = "Test"  # "2023-07-05_10-45_20e6_0-9_1-05_0-2"  # set to empty string to not save data to file
+    output_filename: str = "Test_reps"  # "2023-07-05_10-45_20e6_0-9_1-05_0-2"  # set to empty string to not save data to file
     verbose: bool = False
 
     # Settings the user will not have access to
@@ -95,7 +95,7 @@ def main():
     rx_samples: int = 100000
     rx_auto_gain: bool = True
     plot_data: bool = True
-    num_averages: int = 1
+    num_reps: int = 1
 
     # Validate input args
     center_freqs = np.linspace(min_freq, max_freq, num_freqs, endpoint=True)
@@ -123,45 +123,58 @@ def main():
     if len(tx_buffer.shape) == 1:
         tx_buffer = tx_buffer.reshape(1, tx_buffer.size)
 
+    
+    if verbose:
+        logger.info('Opening serial port...')
+    serial_obj = open_port('/dev/ttyUSB0')
+
+    logger.info("Ready to stream. Waiting for start command...")
+    if not wait_for_start(serial_obj, "START", 100):
+        logger.info("Aborting data collection")
+        return False
+
     # Loop through frequencies
     logger.info("Beginning acquistion loop")
     recv_data_list = []
     for freq_idx, frequency in enumerate(center_freqs):
-        # Create tx and rx threads
-        recv_data_buff = np.zeros(
-            [
-                rx_samples,
-            ],
-            dtype=np.complex64,
-        )
+       
         recv_data_for_freq = np.zeros(
             [
-                num_averages,
+                num_reps,
                 rx_samples,
             ],
             dtype=np.complex64,
         )
 
-        rx_thread = threading.Thread(
-            target=rx_worker, args=(usrp, rx_streamer, rx_metadata, recv_data_buff, verbose)
-        )
-        tx_thread = threading.Thread(
-            target=tx_worker, args=(tx_streamer, tx_metadata, tx_buffer, verbose)
-        )
-        rx_thread.setName("rx_stream")
-        tx_thread.setName("tx_stream")
+        recv_data_buff = np.zeros(
+                [
+                    rx_samples,
+                ],
+                dtype=np.complex64,
+            )
 
         tune_center_freq(usrp, frequency)
 
         logger.info(
             f"Acquiring data at {frequency/1e9}GHz: center freq {freq_idx+1}/{num_freqs}..."
         )
-        for jj in range(num_averages):
+        for jj in range(num_reps):
+             # Create tx and rx threads
+            rx_thread = threading.Thread(
+            target=rx_worker, args=(usrp, rx_streamer, rx_metadata, recv_data_buff, verbose)
+            )
+            tx_thread = threading.Thread(
+                target=tx_worker, args=(tx_streamer, tx_metadata, tx_buffer, verbose)
+            )
+            rx_thread.setName("rx_stream")
+            tx_thread.setName("tx_stream")
+
             rx_thread.start()
             tx_thread.start()
             rx_thread.join()
             tx_thread.join()
             recv_data_for_freq[jj, :] = recv_data_buff 
+            recv_data_buff = 0 * recv_data_buff
             
         # @todo: align and sum signals before saving?
         recv_data_list.append(recv_data_for_freq)
@@ -182,7 +195,7 @@ def main():
         plt.figure()
         plt.plot(t * 1e6, np.real(tx_buffer[0, :]))
         for ii in range(num_freqs):
-            for jj in range(num_averages):
+            for jj in range(num_reps):
                 plt.plot(time_vec_rx * 1e6, np.real(recv_data_list[ii][jj,:]))
                 legend_text.append(f"Rx {ii+1}, rep{jj+1}")
         plt.title("Baseband signals")
