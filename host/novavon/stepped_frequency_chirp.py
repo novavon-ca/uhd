@@ -80,11 +80,11 @@ def rx_worker(usrp, streamer, metadata, rx_data, verbose=False):
 def main():
     # Settings from user - these will come from the command line or a JSON file
     chirp_bw: int = 8e6  # [Hz]
-    chirp_duration: int = 5.025e-5  # [seconds]
-    min_freq: int = 2.8e9 + chirp_bw/2  # [Hz]
-    max_freq: int = 2.96e9 - chirp_bw /2 # [Hz]
-    num_freqs: int = 2
-    output_filename: str = "Test"  # "2023-07-05_10-45_20e6_0-9_1-05_0-2"  # set to empty string to not save data to file
+    chirp_duration: int = 1.025e-5  # [seconds]
+    min_freq: int = 1.4e9 + chirp_bw/2  # [Hz]
+    max_freq: int = 1.56e9 - chirp_bw /2 # [Hz]
+    num_freqs: int = 3
+    output_filename: str = "Demo"  # "2023-07-05_10-45_20e6_0-9_1-05_0-2"  # set to empty string to not save data to file
     verbose: bool = False
 
     # Settings the user will not have access to
@@ -92,10 +92,10 @@ def main():
     chirp_ampl: float = 0.3  # float between 0 and 1
     tx_gain: int = 40  # [dB]
     rx_gain: int = 40  # [dB]
-    rx_samples: int = 100000
-    rx_auto_gain: bool = True
+    rx_samples: int = 80000
+    rx_auto_gain: bool = False
     plot_data: bool = True
-    num_averages: int = 1
+    num_averages: int = 3
 
     # Validate input args
     center_freqs = np.linspace(min_freq, max_freq, num_freqs, endpoint=True)
@@ -142,21 +142,21 @@ def main():
             dtype=np.complex64,
         )
 
-        rx_thread = threading.Thread(
-            target=rx_worker, args=(usrp, rx_streamer, rx_metadata, recv_data_buff, verbose)
-        )
-        tx_thread = threading.Thread(
-            target=tx_worker, args=(tx_streamer, tx_metadata, tx_buffer, verbose)
-        )
-        rx_thread.setName("rx_stream")
-        tx_thread.setName("tx_stream")
-
         tune_center_freq(usrp, frequency)
 
         logger.info(
             f"Acquiring data at {frequency/1e9}GHz: center freq {freq_idx+1}/{num_freqs}..."
         )
         for jj in range(num_averages):
+            rx_thread = threading.Thread(
+                target=rx_worker, args=(usrp, rx_streamer, rx_metadata, recv_data_buff, verbose)
+            )
+            tx_thread = threading.Thread(
+                target=tx_worker, args=(tx_streamer, tx_metadata, tx_buffer, verbose)
+            )
+            rx_thread.setName("rx_stream")
+            tx_thread.setName("tx_stream")
+            
             rx_thread.start()
             tx_thread.start()
             rx_thread.join()
