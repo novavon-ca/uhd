@@ -18,10 +18,11 @@ def rx_worker(usrp, rx_streamer, rx_statistics, rx_data):
     """Receive a fixed number of samples and store in rx_data"""
 
     # Make a receive buffer
+    num_channels: int = rx_streamer.get_num_channels()
     total_samples: int = len(rx_data)
     num_samples_per_packet: int = int(rx_streamer.get_max_num_samps())
     metadata = uhd.types.RXMetadata()
-    recv_buffer: np.ndarray = np.empty((1, num_samples_per_packet), dtype=np.complex64)
+    recv_buffer: np.ndarray = np.empty((num_channels, num_samples_per_packet), dtype=np.complex64)
 
     # Craft and send the Stream Command
     # continuous capture:
@@ -32,7 +33,7 @@ def rx_worker(usrp, rx_streamer, rx_statistics, rx_data):
     # stream_cmd = uhd.types.StreamCMD(uhd.types.StreamMode.num_done)
     # stream_cmd.num_samps = rx_num_samps
 
-    stream_cmd.stream_now = True
+    stream_cmd.stream_now = (num_channels == 1)
     stream_cmd.time_spec = uhd.types.TimeSpec(
         usrp.get_time_now().get_real_secs() + RX_DELAY
     )
@@ -46,8 +47,8 @@ def rx_worker(usrp, rx_streamer, rx_statistics, rx_data):
             rx = rx_streamer.recv(recv_buffer, metadata)
             rx_data[
                 ii * num_samples_per_packet : (ii + 1) * num_samples_per_packet
-            ] = recv_buffer[0]
-            num_rx_samps += int(rx)
+            ] = recv_buffer[0] # @TODO: fix this recv_buf for 2 channels
+            num_rx_samps += int(rx) * num_channels
 
         except RuntimeError as ex:
             logger.error("Runtime error in receive: %s", ex)
@@ -113,7 +114,7 @@ def start_threads(usrp, tx_buf, rx_buf):
 
     rx_statistics: dict[str, int] = {}
     st_args = uhd.usrp.StreamArgs(cpu_sample_mode, otw_sample_mode)
-    st_args.channels = [0]
+    st_args.channels = [0,1]
     rx_streamer = usrp.get_rx_stream(st_args)
     rx_thread = threading.Thread(
         target=rx_worker, args=(usrp, rx_streamer, rx_statistics, rx_buf)
@@ -218,7 +219,6 @@ def main():
     usrp = usrp_setup(args, logger, verbose)
 
     rx_buffer = np.zeros(args["rx_samples"], dtype=np.complex64)
-    # @todo: investigate if zero-padding helps or not
     tx_buffer = dc_chirp(
         args["chirp_ampl"],
         args["chirp_bw"],
@@ -237,7 +237,7 @@ def main():
 
 
 if __name__ == "__main__":
-    RX_DELAY = 0.01  # offset delay between transmitting and receiving @TODO: put this into args?
+    RX_DELAY = 0.05  # offset delay between transmitting and receiving @TODO: put this into args?
 
     global logger
     logger = logging.getLogger(__name__)

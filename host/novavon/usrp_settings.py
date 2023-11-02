@@ -26,7 +26,7 @@ def setup_ref(usrp, ref, logger):
     return True
 
 
-def usrp_setup(args, logger, verbose=False):
+def usrp_setup(args, logger, b210=True, verbose=False):
     """
     Sets up USRP device according to user-defined args
     returns: MultiUSRP object
@@ -38,6 +38,13 @@ def usrp_setup(args, logger, verbose=False):
 
     # Create usrp device
     usrp = uhd.usrp.MultiUSRP()
+
+    # Always select the subdevice first, the channel mapping affects the other settings
+    if b210:
+        usrp.set_rx_subdev_spec(uhd.usrp.SubdevSpec('A:A A:B'))
+    # if args.tx_subdev:
+        # usrp.set_tx_subdev_spec(uhd.usrp.SubdevSpec(args.tx_subdev))
+
     if verbose:
         logger.info("Using Device: %s", usrp.get_pp_string())
 
@@ -77,7 +84,10 @@ def usrp_setup(args, logger, verbose=False):
         logger.info("Actual RX Gain: %f dB...", usrp.get_rx_gain(0))
         logger.info("Actual RX Bandwidth: %f MHz...", usrp.get_rx_bandwidth(0) / 1e6)
 
-    usrp.set_time_now(uhd.types.TimeSpec(0.0))
+    if b210:
+        usrp.set_time_unknown_pps(uhd.types.TimeSpec(0.0))
+    else:
+        usrp.set_time_now(uhd.types.TimeSpec(0.0))
     if verbose:
         logger.info("Set device timestamp to 0")
 
