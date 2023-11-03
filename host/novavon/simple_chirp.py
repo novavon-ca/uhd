@@ -48,9 +48,7 @@ def rx_worker(usrp, rx_streamer, rx_statistics, rx_data):
         try:
             samps = rx_streamer.recv(recv_buffer, metadata)
 
-            rx_data[
-                ii * num_samples_per_packet : (ii + 1) * num_samples_per_packet
-            ] = recv_buffer[:, 0:num_samples_per_packet]
+            rx_data[:, ii * num_samples_per_packet : (ii + 1) * num_samples_per_packet] = recv_buffer[:, 0:num_samples_per_packet]
             num_rx_samps += int(samps) * num_channels
 
         except RuntimeError as ex:
@@ -70,15 +68,16 @@ def tx_worker(usrp, tx_streamer, tx_statistics, transmit_buffer):
     # assert len(transmit_buffer) <= tx_streamer.get_max_num_samps()
 
     # Make a transmit buffer
+    num_channels = tx_streamer.get_num_channels()
     metadata = uhd.types.TXMetadata()
     metadata.start_of_burst = True
     metadata.end_of_burst = False
-    metadata.has_time_spec = False
-    # metadata.time_spec = uhd.types.TimeSpec(usrp.get_time_now().get_real_secs() + TX_DELAY)
+    metadata.has_time_spec = bool(num_channels) #False
+    metadata.time_spec = uhd.types.TimeSpec(usrp.get_time_now().get_real_secs() + TX_DELAY)
 
     # Transmit a fixed number of samples
     num_cycles = 1
-    total_num_samps = np.size(transmit_buffer, 0) * num_cycles
+    total_num_samps = np.size(transmit_buffer, 1) * num_cycles
     num_tx_samps = 0
     num_acc_samps = 0
     while num_acc_samps < total_num_samps:
@@ -93,7 +92,7 @@ def tx_worker(usrp, tx_streamer, tx_statistics, transmit_buffer):
 
     # Send a mini EOB packet
     metadata.end_of_burst = True
-    tx_streamer.send(np.zeros((1, 0), dtype=np.complex64), metadata)
+    tx_streamer.send(np.zeros((num_channels, 0), dtype=np.complex64), metadata)
 
 
 def print_statistics(rx_statistics, tx_statistics):
@@ -127,7 +126,7 @@ def start_threads(usrp, tx_buf, rx_buf):
 
     tx_statistics = {}
     st_args = uhd.usrp.StreamArgs(cpu_sample_mode, otw_sample_mode)
-    st_args.channels = [0]
+    st_args.channels = [0, 1]
     tx_streamer = usrp.get_tx_stream(st_args)
     tx_thread = threading.Thread(
         target=tx_worker, args=(usrp, tx_streamer, tx_statistics, tx_buf)
@@ -160,15 +159,16 @@ def generate_output(args, tx_data, rx_data, tx_stats, rx_stats):
         tx_data = tx_data[0, :]
         # rx_data = rx_data[0, :]
         time_vec_tx = 1 / args["sampling_rate"] * np.arange(0, len(tx_data))
-        time_vec_rx = 1 / args["sampling_rate"] * np.arange(0, len(rx_data))
+        time_vec_rx = 1 / args["sampling_rate"] * np.arange(0, np.size(rx_data,1))
 
         import matplotlib.pyplot as plt
 
         plt.figure()
         plt.plot(time_vec_tx * 1e6, np.real(tx_data))
-        plt.plot(time_vec_rx * 1e6, np.real(rx_data))
+        plt.plot(time_vec_rx * 1e6, np.real(rx_data[0,:]))
+        plt.plot(time_vec_rx * 1e6, np.real(rx_data[1,:]))
         plt.xlabel("Time [us]")
-        plt.legend(["Transmitted", "Received"])
+        plt.legend(["Tx", "CH1 Rx", "CH2 Rx"])
 
         # Plot frequency-domain data
         tx_fd = np.fft.fft(tx_data)
@@ -199,18 +199,18 @@ def main():
     args: dict[str, Any] = {
         "center_freq": 0.5e9,
         "sampling_rate": 25e6,  # samples per second
+        "channel_list": [0, 1],  # [0] or [0,1], applies to both tx and rx
         "chirp_bw": 8e6,
         "chirp_ampl": 0.3,  # float between 0 and 1
         "chirp_duration": 1e-5,
-        "tx_gain": 40,  # [dB]
-        "rx_samples": 80000,
+        "tx_gain": 60,  # [dB]
+        "rx_samples": 150000,
         "rx_antenna": "RX2",  # "RX2" or "TX/RX"
-        "rx_channel_list": [0, 1],  # [0] or [0,1]
-        "rx_gain": 40,  # [dB]
+        "rx_gain": 50,  # [dB]
         "rx_auto_gain": False,
         "output_filename": "test_2rx_chan",  # "Monostatic_newPCBAnt_Reflection4m_25MSps_3GHz",  # set to empty string to not save data to file
         "plot_data": True,
-        "verbose": True,
+        "verbose": False,
     }
 
     args.update({"tx_rate": args["sampling_rate"], "rx_rate": args["sampling_rate"]})
@@ -223,9 +223,10 @@ def main():
     #     logging.error(err_msg)
 
     usrp = usrp_setup(args, logger, verbose)
+    num_channels = len(args["channel_list"])
 
     rx_buffer = np.zeros(
-        [len(args["rx_channel_list"]), args["rx_samples"]], dtype=np.complex64
+        [num_channels, args["rx_samples"]], dtype=np.complex64
     )
     tx_buffer = dc_chirp(
         args["chirp_ampl"],
@@ -236,6 +237,8 @@ def main():
     )
     if len(tx_buffer.shape) == 1:
         tx_buffer = tx_buffer.reshape(1, tx_buffer.size)
+    if num_channels > 1:
+        tx_buffer = np.tile(tx_buffer, (num_channels,1))
     print(tx_buffer.shape)
     tx_dat, rx_dat, tx_stats, rx_stats = start_threads(usrp, tx_buffer, rx_buffer)
     generate_output(args, tx_dat, rx_dat, tx_stats, rx_stats)
@@ -246,6 +249,7 @@ def main():
 
 if __name__ == "__main__":
     RX_DELAY = 0.05  # offset delay between transmitting and receiving @TODO: put this into args?
+    TX_DELAY = 0.05
 
     global logger
     logger = logging.getLogger(__name__)

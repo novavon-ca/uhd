@@ -40,10 +40,9 @@ def usrp_setup(args, logger, verbose=False):
     usrp = uhd.usrp.MultiUSRP()
 
     # Always select the subdevice first, the channel mapping affects the other settings
-    if len(args["rx_channel_list"]) > 1:
+    if len(args["channel_list"]) > 1:
         usrp.set_rx_subdev_spec(uhd.usrp.SubdevSpec("A:A A:B"))
-    # if args.tx_subdev:
-    # usrp.set_tx_subdev_spec(uhd.usrp.SubdevSpec(args.tx_subdev))
+        usrp.set_tx_subdev_spec(uhd.usrp.SubdevSpec("A:A A:B"))
 
     if verbose:
         logger.info("Using Device: %s", usrp.get_pp_string())
@@ -58,14 +57,15 @@ def usrp_setup(args, logger, verbose=False):
     # At this point, we can assume the device has valid and locked clock and PPS
 
     # Tx settings
-    usrp.set_tx_rate(args["tx_rate"])
-    usrp.set_tx_gain(args["tx_gain"])
-    usrp.set_tx_freq(uhd.libpyuhd.types.tune_request(args["center_freq"]), 0)
-    usrp.set_tx_antenna("TX/RX", 0)
-    usrp.set_tx_bandwidth(args["tx_rate"], 0)
+    for chan in args["channel_list"]:
+        usrp.set_tx_rate(args["tx_rate"],chan)
+        usrp.set_tx_gain(args["tx_gain"],chan)
+        usrp.set_tx_freq(uhd.libpyuhd.types.tune_request(args["center_freq"]), chan)
+        usrp.set_tx_antenna("TX/RX", chan)
+        usrp.set_tx_bandwidth(args["tx_rate"], chan)
 
     # Rx settings
-    for chan in args["rx_channel_list"]:
+    for chan in args["channel_list"]:
         usrp.set_rx_rate(args["rx_rate"], chan)
         usrp.set_rx_gain(args["rx_gain"], chan)
         usrp.set_rx_freq(uhd.libpyuhd.types.tune_request(args["center_freq"]), chan)
@@ -77,19 +77,22 @@ def usrp_setup(args, logger, verbose=False):
 
     # Read back settings
     if verbose:
-        logger.info("Actual TX Freq: %f MHz...", usrp.get_tx_freq(0) / 1e6)
-        logger.info("Actual TX Gain: %f dB...", usrp.get_tx_gain(0))
-        logger.info("Actual TX Bandwidth: %f MHz...", usrp.get_tx_bandwidth(0) / 1e6)
+        logger.info("Actual TX1 Freq: %f MHz...", usrp.get_tx_freq(0) / 1e6)
+        logger.info("Actual TX2 Freq: %f MHz...", usrp.get_tx_freq(1) / 1e6)
+        logger.info("Actual TX1 Gain: %f dB...", usrp.get_tx_gain(0))
+        logger.info("Actual TX2 Gain: %f dB...", usrp.get_tx_gain(1))
+        logger.info("Actual TX1 Bandwidth: %f MHz...", usrp.get_tx_bandwidth(0) / 1e6)
+        logger.info("Actual TX2 Bandwidth: %f MHz...", usrp.get_tx_bandwidth(1) / 1e6)
 
         logger.info("Actual RX1 Freq: %f MHz...", usrp.get_rx_freq(0) / 1e6)
-        logger.info("Actual RX1 Gain: %f dB...", usrp.get_rx_gain(0))
-        logger.info("Actual RX1 Bandwidth: %f MHz...", usrp.get_rx_bandwidth(0) / 1e6)
-
         logger.info("Actual RX2 Freq: %f MHz...", usrp.get_rx_freq(1) / 1e6)
+        logger.info("Actual RX1 Gain: %f dB...", usrp.get_rx_gain(0))
         logger.info("Actual RX2 Gain: %f dB...", usrp.get_rx_gain(1))
+        logger.info("Actual RX1 Bandwidth: %f MHz...", usrp.get_rx_bandwidth(0) / 1e6)
         logger.info("Actual RX2 Bandwidth: %f MHz...", usrp.get_rx_bandwidth(1) / 1e6)
+        
 
-    if len(args["rx_channel_list"]) > 1:
+    if len(args["channel_list"]) > 1:
         usrp.set_time_unknown_pps(uhd.types.TimeSpec(0.0))
     else:
         usrp.set_time_now(uhd.types.TimeSpec(0.0))
@@ -103,7 +106,7 @@ def setup_streamers(usrp):
     cpu_sample_mode = "fc32"
     otw_sample_mode = "sc16"
     st_args = uhd.usrp.StreamArgs(cpu_sample_mode, otw_sample_mode)
-    st_args.channels = [0]
+    st_args.channels = [0, 1]
     tx_streamer = usrp.get_tx_stream(st_args)
 
     st_args.channels = [0, 1]
