@@ -19,11 +19,13 @@ def rx_worker(usrp, rx_streamer, rx_statistics, rx_data):
 
     # Make a receive buffer
     num_channels: int = rx_streamer.get_num_channels()
-    total_samples: int = len(rx_data)
+    total_samples: int = np.size(rx_data, 1)
     num_samples_per_packet: int = int(rx_streamer.get_max_num_samps())
     metadata = uhd.types.RXMetadata()
-    recv_buffer: np.ndarray = np.empty((num_channels, num_samples_per_packet), dtype=np.complex64)
-
+    recv_buffer: np.ndarray = np.empty(
+        (num_channels, num_samples_per_packet), dtype=np.complex64
+    )
+    assert num_channels == np.size(rx_data, 0)
     # Craft and send the Stream Command
     # continuous capture:
     stream_cmd = uhd.types.StreamCMD(uhd.types.StreamMode.start_cont)
@@ -33,7 +35,7 @@ def rx_worker(usrp, rx_streamer, rx_statistics, rx_data):
     # stream_cmd = uhd.types.StreamCMD(uhd.types.StreamMode.num_done)
     # stream_cmd.num_samps = rx_num_samps
 
-    stream_cmd.stream_now = (num_channels == 1)
+    stream_cmd.stream_now = num_channels == 1
     stream_cmd.time_spec = uhd.types.TimeSpec(
         usrp.get_time_now().get_real_secs() + RX_DELAY
     )
@@ -44,11 +46,12 @@ def rx_worker(usrp, rx_streamer, rx_statistics, rx_data):
     # Receive until set number of samples are captured
     for ii in range(total_samples // num_samples_per_packet):
         try:
-            rx = rx_streamer.recv(recv_buffer, metadata)
+            samps = rx_streamer.recv(recv_buffer, metadata)
+
             rx_data[
                 ii * num_samples_per_packet : (ii + 1) * num_samples_per_packet
-            ] = recv_buffer[0] # @TODO: fix this recv_buf for 2 channels
-            num_rx_samps += int(rx) * num_channels
+            ] = recv_buffer[:, 0:num_samples_per_packet]
+            num_rx_samps += int(samps) * num_channels
 
         except RuntimeError as ex:
             logger.error("Runtime error in receive: %s", ex)
@@ -114,7 +117,7 @@ def start_threads(usrp, tx_buf, rx_buf):
 
     rx_statistics: dict[str, int] = {}
     st_args = uhd.usrp.StreamArgs(cpu_sample_mode, otw_sample_mode)
-    st_args.channels = [0,1]
+    st_args.channels = [0, 1]
     rx_streamer = usrp.get_rx_stream(st_args)
     rx_thread = threading.Thread(
         target=rx_worker, args=(usrp, rx_streamer, rx_statistics, rx_buf)
@@ -170,14 +173,16 @@ def generate_output(args, tx_data, rx_data, tx_stats, rx_stats):
         # Plot frequency-domain data
         tx_fd = np.fft.fft(tx_data)
         freqs_tx = np.fft.fftfreq(len(tx_fd), d=time_vec_tx[1] - time_vec_tx[0])
-        rx_fd = np.fft.fft(rx_data)
-        freqs_rx = np.fft.fftfreq(len(rx_fd), d=time_vec_rx[1] - time_vec_rx[0])
+        rx1_fd = np.fft.fft(rx_data[0, :])
+        rx2_fd = np.fft.fft(rx_data[1, :])
+        freqs_rx = np.fft.fftfreq(len(rx1_fd), d=time_vec_rx[1] - time_vec_rx[0])
         plt.figure()
         plt.plot(freqs_tx / 1e6, 20 * np.log10(np.abs(tx_fd / len(tx_fd))))
-        plt.plot(freqs_rx / 1e6, 20 * np.log10(np.abs(rx_fd / len(rx_fd))))
+        plt.plot(freqs_rx / 1e6, 20 * np.log10(np.abs(rx1_fd / len(rx1_fd))))
+        plt.plot(freqs_rx / 1e6, 20 * np.log10(np.abs(rx2_fd / len(rx2_fd))))
         plt.xlabel("Frequency [MHz]")
         plt.ylabel("Magnitude [dB]")
-        plt.legend(["Transmitted", "Received"])
+        plt.legend(["Tx", "CH1 Rx", "CH2 Rx"])
         plt.ylim(-80, -10)
         plt.grid(True)
         plt.show()
@@ -192,7 +197,7 @@ def main():
     success = False
 
     args: dict[str, Any] = {
-        "center_freq": 2.9e9,
+        "center_freq": 0.5e9,
         "sampling_rate": 25e6,  # samples per second
         "chirp_bw": 8e6,
         "chirp_ampl": 0.3,  # float between 0 and 1
@@ -200,9 +205,10 @@ def main():
         "tx_gain": 40,  # [dB]
         "rx_samples": 80000,
         "rx_antenna": "RX2",  # "RX2" or "TX/RX"
+        "rx_channel_list": [0, 1],  # [0] or [0,1]
         "rx_gain": 40,  # [dB]
         "rx_auto_gain": False,
-        "output_filename": "",# "Monostatic_newPCBAnt_Reflection4m_25MSps_3GHz",  # set to empty string to not save data to file
+        "output_filename": "test_2rx_chan",  # "Monostatic_newPCBAnt_Reflection4m_25MSps_3GHz",  # set to empty string to not save data to file
         "plot_data": True,
         "verbose": True,
     }
@@ -218,7 +224,9 @@ def main():
 
     usrp = usrp_setup(args, logger, verbose)
 
-    rx_buffer = np.zeros(args["rx_samples"], dtype=np.complex64)
+    rx_buffer = np.zeros(
+        [len(args["rx_channel_list"]), args["rx_samples"]], dtype=np.complex64
+    )
     tx_buffer = dc_chirp(
         args["chirp_ampl"],
         args["chirp_bw"],
