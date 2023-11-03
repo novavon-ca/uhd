@@ -22,7 +22,7 @@ def rx_worker(usrp, rx_streamer, rx_statistics, rx_data):
     total_samples: int = np.size(rx_data, 1)
     num_samples_per_packet: int = int(rx_streamer.get_max_num_samps())
     metadata = uhd.types.RXMetadata()
-    recv_buffer: np.ndarray = np.empty(
+    recv_buffer: np.ndarray = np.zeros(
         (num_channels, num_samples_per_packet), dtype=np.complex64
     )
     assert num_channels == np.size(rx_data, 0)
@@ -59,7 +59,9 @@ def rx_worker(usrp, rx_streamer, rx_statistics, rx_data):
     rx_statistics["num_rx_samps"] = num_rx_samps
 
     # After we get the signal to stop, issue a stop command
+    rx_streamer.recv(recv_buffer, metadata)
     rx_streamer.issue_stream_cmd(uhd.types.StreamCMD(uhd.types.StreamMode.stop_cont))
+
 
 
 def tx_worker(usrp, tx_streamer, tx_statistics, transmit_buffer):
@@ -76,7 +78,7 @@ def tx_worker(usrp, tx_streamer, tx_statistics, transmit_buffer):
     metadata.time_spec = uhd.types.TimeSpec(usrp.get_time_now().get_real_secs() + TX_DELAY)
 
     # Transmit a fixed number of samples
-    num_cycles = 1
+    num_cycles = 10
     total_num_samps = np.size(transmit_buffer, 1) * num_cycles
     num_tx_samps = 0
     num_acc_samps = 0
@@ -156,34 +158,35 @@ def generate_output(args, tx_data, rx_data, tx_stats, rx_stats):
         if args["verbose"]:
             logger.info("Plotting received data...")
 
-        tx_data = tx_data[0, :]
-        # rx_data = rx_data[0, :]
-        time_vec_tx = 1 / args["sampling_rate"] * np.arange(0, len(tx_data))
+        time_vec_tx = 1 / args["sampling_rate"] * np.arange(0, np.size(tx_data,1))
         time_vec_rx = 1 / args["sampling_rate"] * np.arange(0, np.size(rx_data,1))
 
         import matplotlib.pyplot as plt
 
         plt.figure()
-        plt.plot(time_vec_tx * 1e6, np.real(tx_data))
-        plt.plot(time_vec_rx * 1e6, np.real(rx_data[0,:]))
-        plt.plot(time_vec_rx * 1e6, np.real(rx_data[1,:]))
+        plt.plot(time_vec_tx * 1e6, np.real(tx_data[0,:]))
+        plt.plot(time_vec_tx * 1e6, np.real(tx_data[1,:]))
+        plt.plot(time_vec_rx * 1e6, np.real(rx_data[0,:])-0.1)
+        plt.plot(time_vec_rx * 1e6, np.real(rx_data[1,:]+0.1))
         plt.xlabel("Time [us]")
-        plt.legend(["Tx", "CH1 Rx", "CH2 Rx"])
+        plt.legend(["Tx1", "Tx2", "Rx1", "Rx2"])
 
         # Plot frequency-domain data
-        tx_fd = np.fft.fft(tx_data)
-        freqs_tx = np.fft.fftfreq(len(tx_fd), d=time_vec_tx[1] - time_vec_tx[0])
+        tx1_fd = np.fft.fft(tx_data[0, :])
+        tx2_fd = np.fft.fft(tx_data[1, :])
+        freqs_tx = np.fft.fftfreq(len(tx1_fd), d=time_vec_tx[1] - time_vec_tx[0])
         rx1_fd = np.fft.fft(rx_data[0, :])
         rx2_fd = np.fft.fft(rx_data[1, :])
         freqs_rx = np.fft.fftfreq(len(rx1_fd), d=time_vec_rx[1] - time_vec_rx[0])
         plt.figure()
-        plt.plot(freqs_tx / 1e6, 20 * np.log10(np.abs(tx_fd / len(tx_fd))))
+        plt.plot(freqs_tx / 1e6, 20 * np.log10(np.abs(tx1_fd / len(tx1_fd))))
+        plt.plot(freqs_tx / 1e6, 20 * np.log10(np.abs(tx2_fd / len(tx2_fd))))
         plt.plot(freqs_rx / 1e6, 20 * np.log10(np.abs(rx1_fd / len(rx1_fd))))
         plt.plot(freqs_rx / 1e6, 20 * np.log10(np.abs(rx2_fd / len(rx2_fd))))
         plt.xlabel("Frequency [MHz]")
         plt.ylabel("Magnitude [dB]")
-        plt.legend(["Tx", "CH1 Rx", "CH2 Rx"])
-        plt.ylim(-80, -10)
+        plt.legend(["Tx1", "Tx2", "Rx1", "Rx2"])
+        plt.ylim(-100, -30)
         plt.grid(True)
         plt.show()
 
@@ -202,13 +205,13 @@ def main():
         "channel_list": [0, 1],  # [0] or [0,1], applies to both tx and rx
         "chirp_bw": 8e6,
         "chirp_ampl": 0.3,  # float between 0 and 1
-        "chirp_duration": 1e-5,
+        "chirp_duration": 1.025e-5,
         "tx_gain": 60,  # [dB]
-        "rx_samples": 150000,
+        "rx_samples": 50000,
         "rx_antenna": "RX2",  # "RX2" or "TX/RX"
-        "rx_gain": 50,  # [dB]
+        "rx_gain": 45,  # [dB]
         "rx_auto_gain": False,
-        "output_filename": "test_2rx_chan",  # "Monostatic_newPCBAnt_Reflection4m_25MSps_3GHz",  # set to empty string to not save data to file
+        "output_filename": "",  # "Monostatic_newPCBAnt_Reflection4m_25MSps_3GHz",  # set to empty string to not save data to file
         "plot_data": True,
         "verbose": False,
     }
@@ -248,7 +251,7 @@ def main():
 
 
 if __name__ == "__main__":
-    RX_DELAY = 0.05  # offset delay between transmitting and receiving @TODO: put this into args?
+    RX_DELAY = 0.049  # offset delay between transmitting and receiving @TODO: put this into args?
     TX_DELAY = 0.05
 
     global logger

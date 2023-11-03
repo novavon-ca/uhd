@@ -37,7 +37,7 @@ def usrp_setup(args, logger, verbose=False):
     pps = "internal"
 
     # Create usrp device
-    usrp = uhd.usrp.MultiUSRP()
+    usrp = uhd.usrp.MultiUSRP("num_recv_frames=512") #recv_frame_size=512, 
 
     # Always select the subdevice first, the channel mapping affects the other settings
     if len(args["channel_list"]) > 1:
