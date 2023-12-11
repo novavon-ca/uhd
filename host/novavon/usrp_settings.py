@@ -104,12 +104,11 @@ def usrp_setup(args, logger, verbose=False):
 
 def setup_streamers(usrp):
     cpu_sample_mode = "fc32"
-    otw_sample_mode = "sc16"
+    otw_sample_mode = "sc8" # receive 8-bit data over-the-wire (can be 8 ,12(?) or 16)
     st_args = uhd.usrp.StreamArgs(cpu_sample_mode, otw_sample_mode)
     st_args.channels = [0, 1]
     tx_streamer = usrp.get_tx_stream(st_args)
 
-    st_args.channels = [0, 1]
     rx_streamer = usrp.get_rx_stream(st_args)
 
     rx_metadata = uhd.types.RXMetadata()

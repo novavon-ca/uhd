@@ -26,7 +26,7 @@ def dc_chirp(ampl, bw, fs, duration, pad=False, ret_time_samples=False):
     )
 
     if pad and num_samples < max_samples:
-        num_zeros = int(max_samples - num_samples)
+        num_zeros = int(max_samples - num_samples+1)
         print(f"Padding with {num_zeros} zeros")
         chirp = np.pad(chirp, int(num_zeros / 2), "constant", constant_values=(0))
         t = 1 / fs * np.arange(0, num_samples + num_zeros)
