@@ -19,37 +19,43 @@ class Anim:
         self.end_time_seconds: float = (
             20  # how long to run the animation for, in seconds
         )
-
         self.data_source: DataSource = data_source
-        self.data_dir: str = ""
-        self.data_dir = "/Users/hannah/Documents/Novavon/uhd/host/novavon/sample_data/"
+        self.data_dir: str = (
+            "/Users/hannah/Documents/Novavon/uhd/host/novavon/sample_data/"
+        )
 
-        if self.data_source == DataSource.FROM_FILE:
-            anim_func = self.animate
-            self.frames = 5
-        elif self.data_source == DataSource.SDR:
-            self.xframes, self.yframes = self.load_from_file(
-                "sample_benchmark_data5.json", fft
-            )  # this is just here temporarily so we can simulate new frames coming in
-            self.frames: int = 20
+        if self.data_source == DataSource.STATIC_JSON:
+            self.animation: FuncAnimation = FuncAnimation(
+                fig,
+                self.animate,
+                interval=1000,
+                frames=5,
+                repeat=True,
+            )
+        elif self.data_source == DataSource.CSV:
+            self.xframes, self.yframes = self.load_csv_data("test_writer.csv")
             if fft:
-                anim_func = self.animate_fft
+                self.animation = FuncAnimation(
+                    fig,
+                    self.animate_fft,
+                    interval=1000,
+                    frames=20,
+                    repeat=False,
+                )
             else:
                 self.x_data: List[float] = []
                 self.y_data: List[float] = []
-                anim_func = self.animate_scrolling
+                self.animation = FuncAnimation(
+                    fig,
+                    self.animate_scrolling,
+                    interval=2000,
+                    frames=40,
+                    repeat=False,
+                )
         else:
             raise (NotImplementedError)
 
-        self.animation: FuncAnimation = FuncAnimation(
-            fig,
-            self.animate_fft,
-            interval=1000,
-            frames=self.frames,
-            repeat=self.data_source == DataSource.FROM_FILE,
-        )
-
-    def load_from_file(self, filename: str, imag: bool = False) -> Tuple[List, List]:
+    def load_json_data(self, filename: str, imag: bool = False) -> Tuple[List, List]:
         x_data: List = []
         y1_data: List = []
         # y2_data = []
@@ -79,6 +85,31 @@ class Anim:
                 # y2_data = y2_data + list(ch2)
         return x_data, y1_data
 
+    def load_csv_data(self, filename: str) -> Tuple[List, List]:
+        import csv
+        import re
+
+        x_data, y_data = [], []
+        reg_chars = "[\[\\n\]]"
+        with open(self.data_dir + filename, "r") as f:
+            csv_reader = csv.DictReader(f)
+            for row in csv_reader:
+                start = float(row["start_time"])
+                fs = float(row["fs"])
+                y_real = re.sub(reg_chars, "", row["real"]).split(" ")
+                y_real = [float(val) for val in y_real if len(val)]
+
+                y_imag = re.sub(reg_chars, "", row["imag"]).split(" ")
+                y_imag = [float(val) for val in y_imag if len(val)]
+                y = [complex(y_real[val], y_imag[val]) for val in range(len(y_real))]
+                num_samples = len(y)
+                x = np.linspace(
+                    start, start + (num_samples - 1) / fs, num=num_samples
+                ).tolist()
+                x_data = x_data + x
+                y_data = y_data + y
+        return x_data, y_data
+
     def get_next_frame(self, frame_idx: int, frame_len: int) -> Tuple[List, List]:
         # for now the frames will come from self.xdat and self.ydat, but in future will come directly from sdr
         start_idx: int = frame_idx * frame_len
@@ -90,7 +121,7 @@ class Anim:
             self.animation.event_source.stop()
         else:
             filename: str = f"sample_benchmark_data{i+1}.json"
-            x_data, y_data = self.load_from_file(filename)
+            x_data, y_data = self.load_json_data(filename)
             title_str: str = filename
 
             plt.cla()
@@ -104,49 +135,46 @@ class Anim:
 
     def animate_fft(self, i: int) -> None:
         # @TODO: shift to correct center freq
-        # from scipy.signal import hilbert
 
-        frame_len: int = 4080
+        frame_len: int = 500
         frame_t, frame_y = self.get_next_frame(i, frame_len)
         frame_Y = np.fft.fftshift(np.fft.fft(frame_y))
         delta_t = frame_t[1] - frame_t[0]
         frame_f = np.fft.fftshift(np.fft.fftfreq(frame_len, delta_t))
 
         plt.cla()
-        plt.plot(frame_f, 20 * np.log10(abs(frame_Y)), label="Signal")
-        # plt.plot(frame_f, abs(hilbert(abs(frame_Y))), label="Envelope")
+        plt.plot(frame_f, 20 * np.log10(abs(frame_Y)))
         plt.title(f"Frame {i+1}")
         plt.xlabel("Frequency [Hz]")
         plt.ylabel("Magnitude [dB]")
         plt.ylim([-30, 30])
-        # plt.legend(loc="upper right")
 
     def animate_scrolling(self, i: int) -> None:
-        frame_len: int = 400
-        frames_to_show: int = 1
-        shift: int = int(0.9 * frame_len)
+        frame_len: int = 500
+        frames_to_show: int = 2
+        shift: int = frame_len  # int(0.5 * frame_len)
 
         frame_x, frame_y = self.get_next_frame(i, frame_len)
 
         self.x_data = self.x_data + frame_x
-        self.y_data = self.y_data + frame_y
+        self.y_data = self.y_data + np.real(frame_y).tolist()
 
-        if i >= frames_to_show:
-            # start_idx = (i + 1 - frames_to_show) * frame_len
-            self.x_data = self.x_data[shift:]
-            self.y_data = self.y_data[shift:]
+        if len(self.y_data) > frame_len:
+            if i >= frames_to_show:
+                self.x_data = self.x_data[shift:]
+                self.y_data = self.y_data[shift:]
 
-        if max(self.y_data) > 0.1:
-            plt.cla()
-            plt.plot(self.x_data, self.y_data, label="Ch 1")
-            plt.title(f"Frame {i+1}")
-            plt.xlabel("Time [milliseconds]")
-            plt.ylabel("Real part")
+            if max(self.y_data) > 0.1:
+                plt.cla()
+                plt.plot(self.x_data, self.y_data, label="Ch 1")
+                plt.title(f"Frame {i+1}")
+                plt.xlabel("Time [milliseconds]")
+                plt.ylabel("Real part")
 
 
 def main():
-    data_source: DataSource = DataSource.SDR
-    fft = True
+    data_source: DataSource = DataSource.CSV
+    fft = False
     fig: plt.Figure = plt.figure()
     a: Anim = Anim(fig, data_source, fft=fft)
     plt.show()
