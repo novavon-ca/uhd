@@ -33,13 +33,13 @@ class Anim:
                 repeat=True,
             )
         elif self.data_source == DataSource.CSV:
-            self.xframes, self.yframes = self.load_csv_data("test_writer.csv")
             if fft:
+                self.xframes, self.yframes = self.load_csv_data("test_writer.csv")
                 self.animation = FuncAnimation(
                     fig,
                     self.animate_fft,
                     interval=1000,
-                    frames=20,
+                    frames=40,
                     repeat=False,
                 )
             else:
@@ -48,8 +48,8 @@ class Anim:
                 self.animation = FuncAnimation(
                     fig,
                     self.animate_scrolling,
-                    interval=2000,
-                    frames=40,
+                    interval=1000,
+                    frames=50,
                     repeat=False,
                 )
         else:
@@ -85,12 +85,12 @@ class Anim:
                 # y2_data = y2_data + list(ch2)
         return x_data, y1_data
 
-    def load_csv_data(self, filename: str) -> Tuple[List, List]:
+    def load_csv_data(self, filename: str, real_only: bool = True) -> Tuple[List, List]:
         import csv
         import re
 
         x_data, y_data = [], []
-        reg_chars = "[\[\\n\]]"
+        reg_chars: str = "[\[\\n\]]"
         with open(self.data_dir + filename, "r") as f:
             csv_reader = csv.DictReader(f)
             for row in csv_reader:
@@ -98,10 +98,15 @@ class Anim:
                 fs = float(row["fs"])
                 y_real = re.sub(reg_chars, "", row["real"]).split(" ")
                 y_real = [float(val) for val in y_real if len(val)]
+                if real_only:
+                    y = y_real
+                else:
+                    y_imag = re.sub(reg_chars, "", row["imag"]).split(" ")
+                    y_imag = [float(val) for val in y_imag if len(val)]
+                    y = [
+                        complex(y_real[val], y_imag[val]) for val in range(len(y_real))
+                    ]
 
-                y_imag = re.sub(reg_chars, "", row["imag"]).split(" ")
-                y_imag = [float(val) for val in y_imag if len(val)]
-                y = [complex(y_real[val], y_imag[val]) for val in range(len(y_real))]
                 num_samples = len(y)
                 x = np.linspace(
                     start, start + (num_samples - 1) / fs, num=num_samples
@@ -137,44 +142,49 @@ class Anim:
         # @TODO: shift to correct center freq
 
         frame_len: int = 500
-        frame_t, frame_y = self.get_next_frame(i, frame_len)
-        frame_Y = np.fft.fftshift(np.fft.fft(frame_y))
-        delta_t = frame_t[1] - frame_t[0]
-        frame_f = np.fft.fftshift(np.fft.fftfreq(frame_len, delta_t))
+        t_data, y_data = self.load_csv_data("test_writer.csv", real_only=True)
+        start = i * frame_len
+        stop = start + frame_len
+
+        frame_t = t_data[start:stop]
+        frame_y = y_data[start:stop]
+
+        if len(frame_y):
+            self.frame_Y = np.fft.fftshift(np.fft.fft(frame_y))
+            delta_t = frame_t[1] - frame_t[0]
+            self.frame_f = np.fft.fftshift(np.fft.fftfreq(frame_len, delta_t))
 
         plt.cla()
-        plt.plot(frame_f, 20 * np.log10(abs(frame_Y)))
+        plt.plot(self.frame_f, 20 * np.log10(abs(self.frame_Y)))
         plt.title(f"Frame {i+1}")
         plt.xlabel("Frequency [Hz]")
         plt.ylabel("Magnitude [dB]")
-        plt.ylim([-30, 30])
+        plt.ylim([-30, 50])
 
     def animate_scrolling(self, i: int) -> None:
         frame_len: int = 500
         frames_to_show: int = 2
-        shift: int = frame_len  # int(0.5 * frame_len)
+        shift = 0.9 * frame_len / 2
 
-        frame_x, frame_y = self.get_next_frame(i, frame_len)
+        x_data, y_data = self.load_csv_data("test_writer.csv", real_only=True)
 
-        self.x_data = self.x_data + frame_x
-        self.y_data = self.y_data + np.real(frame_y).tolist()
+        if i < frames_to_show:
+            self.start = 0
+            self.stop = (i + 1) * frame_len
+        else:
+            self.start = self.start + shift
+            self.stop = self.stop + shift
 
-        if len(self.y_data) > frame_len:
-            if i >= frames_to_show:
-                self.x_data = self.x_data[shift:]
-                self.y_data = self.y_data[shift:]
-
-            if max(self.y_data) > 0.1:
-                plt.cla()
-                plt.plot(self.x_data, self.y_data, label="Ch 1")
-                plt.title(f"Frame {i+1}")
-                plt.xlabel("Time [milliseconds]")
-                plt.ylabel("Real part")
+        plt.cla()
+        plt.plot(x_data[self.start : self.stop], y_data[self.start : self.stop])
+        plt.title(f"Frame {i+1}")
+        plt.xlabel("Time [milliseconds]")
+        plt.ylabel("Real part")
 
 
 def main():
     data_source: DataSource = DataSource.CSV
-    fft = False
+    fft = True
     fig: plt.Figure = plt.figure()
     a: Anim = Anim(fig, data_source, fft=fft)
     plt.show()
