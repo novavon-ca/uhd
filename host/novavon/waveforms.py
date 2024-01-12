@@ -15,21 +15,17 @@ def sine(ampl, wave_freq, rate, ret_time_samples=False):
         return data
 
 
-def dc_chirp(ampl, bw, fs, duration, pad=False, ret_time_samples=False):
-    max_samples = 2040
+def dc_chirp(ampl, bw, fs, duration, pad_length: int = 4096, ret_time_samples=False):
     num_samples = int(fs * duration)
 
-    # t = np.linspace(0, duration, num=num_samples)
     t = np.linspace(-duration / 2, duration / 2, num=num_samples)
     chirp = ampl * np.array(
-        np.exp(1j * np.pi * 0.5 * (bw / np.max(t)) * (t**2)), dtype=np.complex64
+        np.exp(1j * np.pi * 0.5 * (bw / t[-1]) * (t**2)), dtype=np.complex64
     )
 
-    if pad and num_samples < max_samples:
-        num_zeros = int(max_samples - num_samples)
-        print(f"Padding with {num_zeros} zeros")
-        chirp = np.pad(chirp, int(num_zeros / 2), "constant", constant_values=(0))
-        t = 1 / fs * np.arange(0, num_samples + num_zeros)
+    if pad_length > 0:
+        chirp = np.pad(chirp, pad_length, "constant", constant_values=(0))
+        t = 1 / fs * np.arange(0, num_samples + pad_length * 2)
 
     if ret_time_samples:
         return chirp, t
@@ -58,9 +54,9 @@ if __name__ == "__main__":
     ampl = 0.3
     wave_freq = 1e4
     sine_rate = 1e6
-    chirp_rate = 25e6
-    chirp_bw = 10e6  # (2e9 - 800e6) / 2
-    chirp_duration = 3e-5  # [seconds]
+    chirp_sampling_rate = 20e6
+    chirp_bw = 8e6  # (2e9 - 800e6) / 2
+    chirp_duration = 1e-4  # [seconds]
 
     # w1, t1 = sine(ampl, wave_freq, sine_rate, ret_time_samples=True)
 
@@ -71,16 +67,23 @@ if __name__ == "__main__":
     w1, t1 = dc_chirp(
         ampl,
         chirp_bw,
-        chirp_rate,
+        chirp_sampling_rate,
         chirp_duration,
-        pad=False,
         ret_time_samples=True,
     )
     w2, t2 = dc_chirp(
-        ampl, chirp_bw, chirp_rate, chirp_duration / 2, pad=False, ret_time_samples=True
+        ampl,
+        chirp_bw,
+        chirp_sampling_rate,
+        chirp_duration / 2,
+        ret_time_samples=True,
     )
     w3, t3 = dc_chirp(
-        ampl, chirp_bw, chirp_rate, chirp_duration / 3, pad=False, ret_time_samples=True
+        ampl,
+        chirp_bw,
+        chirp_sampling_rate,
+        chirp_duration / 3,
+        ret_time_samples=True,
     )
 
     # plt.figure(1)
