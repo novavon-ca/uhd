@@ -2,10 +2,17 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.signal import windows
-from waveforms import dc_chirp
+from scipy.signal import windows, hilbert
+from waveforms import dc_chirp, chirp
 from utilities import nextpow2, DataLoader
 from typing import List
+from enum import Enum, auto
+
+
+class WindowType(Enum):
+    RECT = auto()
+    HAMMING = auto()
+    TUKEY = auto()
 
 
 def time_window(recv_data_list, pulse_duration_samples, plot=False):
@@ -68,7 +75,7 @@ class FrequencyStacking:
         self.fft_freqs = np.fft.fftfreq(self.num_samples, d=(1 / self.sampling_rate))
         self.fft_freqs_shifted = np.fft.fftshift(self.fft_freqs)
         self.rect_window = np.where(
-            np.abs(self.fft_freqs_shifted) <= (self.chirp_bw * 1.0) / 2, 1, 0
+            np.abs(self.fft_freqs_shifted) <= (self.chirp_bw * 1.02) / 2, 1, 0
         )
         self.ideal_chirp_fd = (
             np.fft.fft(
@@ -112,7 +119,9 @@ class FrequencyStacking:
                 print(f"Freq {ii+1}/{self.num_freqs}")
 
             # 1. Compute compressed subpulse spectrum
-            compressed_pulse = self.matched_filter(ii, data_chan, reference_chan)
+            compressed_pulse = self.matched_filter(
+                ii, data_chan, reference_chan, correct_phs_only=True
+            )
 
             # 2. Filter baseband pulse with rect window having Bs >= Bi
             fd_signal_filt = np.fft.fftshift(compressed_pulse) * self.rect_window
@@ -136,34 +145,82 @@ class FrequencyStacking:
 
         return summed_subpulses_fd
 
-    def gls_filter(self):
-        # TODO
-        raise (NotImplementedError)
+    def gls_filter(
+        self, window_type: WindowType = WindowType.RECT, synthetic: bool = True
+    ):
+        if synthetic:
+            chan_idx_synth = np.inf
+            W = self.compute_sww(chan_idx_synth, chan_idx_synth)
+        else:
+            # TODO: build reference SWW from calibration rx channel
+            raise NotImplementedError
+        min_freq = self.center_freqs[0] - self.chirp_bw / 2
+        max_freq = self.center_freqs[-1] + self.chirp_bw / 2
+        fs_wb = len(W) * (self.padded_freqs[1] - self.padded_freqs[0])
+        M = np.fft.fftshift(
+            np.fft.fft(
+                chirp(
+                    fs_wb,
+                    self.chirp_duration,
+                    min_freq,
+                    max_freq,
+                ),
+                n=len(W),
+            )
+        ) / len(W)
+        if window_type == WindowType.RECT:
+            window = (
+                np.where(np.abs(self.padded_freqs) <= max_freq, 1, 0)
+                + np.where(np.abs(self.padded_freqs) >= min_freq, 1, 0)
+                - 1
+            )
+        elif window_type == WindowType.HAMMING:
+            window = windows.hamming(len(W))
+        else:
+            raise NotImplementedError
+        nonzeros = np.nonzero(W)
+        H = np.zeros_like(W)
+        H[nonzeros] = M[nonzeros] / W[nonzeros] * window[nonzeros]
+        return H / np.max(np.abs(H))
 
     def matched_filter(
-        self, freq_idx: int, data_chan: int, ref_chan: int
+        self,
+        freq_idx: int,
+        data_chan: int,
+        ref_chan: int,
+        correct_phs_only: bool = False,
     ) -> np.ndarray:
-        if data_chan < self.num_channels:
-            # use measured phase-coherent reference
-            Zi = np.fft.fft(self.recv_data_list[freq_idx][data_chan]) / self.num_samples
-            Vi = np.fft.fft(self.recv_data_list[freq_idx][ref_chan]) / self.num_samples
+        # if channel indices are in range of real connected channels, use experimental data; otherwise use ideal chirp
+        Zi = (
+            np.fft.fft(self.recv_data_list[freq_idx][data_chan]) / self.num_samples
+            if data_chan < self.num_channels
+            else self.ideal_chirp_fd
+        )
+        Vi = (
+            np.fft.fft(self.recv_data_list[freq_idx][ref_chan]) / self.num_samples
+            if ref_chan < self.num_channels
+            else self.ideal_chirp_fd
+        )
+        Di = Zi * np.conj(Vi)
+        if correct_phs_only:
+            return np.abs(Zi) * np.exp(1j * np.angle(Di))
         else:
-            # use ideal chirp
-            Zi = self.ideal_chirp_fd
-            Vi = self.ideal_chirp_fd
-        return Zi * np.conj(Vi)
+            return Di
 
 
 def main():
     input_dir = "/Users/hannah/Documents/TerraWave/test data/"
     input_filenames = [
-        "sfcw_jan10_16Msps_half_chirp_len_A.mat",
-        "sfcw_jan10_16Msps_half_chirp_len_B.mat",
-        "sfcw_jan10_16Msps_A.mat",
-        "sfcw_jan10_16Msps_B.mat",
+        "sfcw_jan22_12mhzchirp_A.mat",
+        "sfcw_jan22_12mhzchirp_B.mat",
+        "sfcw_jan22_15mhzchirp_A.mat",
+        "sfcw_jan22_15mhzchirp_B.mat",
     ]
-    data_ch_idx = 0
-    ref_ch_idx = 1
+    data_ch_idx = 1
+    ref_ch_idx = 0
+    time_domain_analysis = True
+    gls_flag = True
+
     for ii in range(len(input_filenames)):
         Loader = DataLoader()
         input_filename = input_filenames[ii]
@@ -172,14 +229,15 @@ def main():
             Loader.recv_data_list,
             Loader.p["chirp_duration"] * Loader.p["sampling_rate"],
         )
-        FreqStacking = FrequencyStacking(trimmed_data, Loader.p, verbose=False)
-
+        FreqStacking = FrequencyStacking(trimmed_data, Loader.p, verbose=True)
         sww_spectrum = FreqStacking.compute_sww(data_ch_idx, ref_ch_idx)
-        sww_td = np.fft.fftshift(
-            len(sww_spectrum) * np.real(np.fft.ifft(np.fft.ifftshift(sww_spectrum)))
-        )
+        if gls_flag:
+            gls_filter = FreqStacking.gls_filter()
+            sww_spectrum = gls_filter * sww_spectrum
 
         plt.figure(1)
+        plt.subplot(2, 2, ii + 1)
+        plt.title(input_filename)
         idx_to_plot = np.nonzero(sww_spectrum)
         plt.plot(
             FreqStacking.padded_freqs[idx_to_plot] / 1e6,
@@ -189,31 +247,42 @@ def main():
                 / np.max(np.abs(sww_spectrum[idx_to_plot]))
             ),
         )
+        plt.grid()
 
-        plt.figure(2)
-        wave_speed = 2e8  # [m/s] -- approx val for coax
-        padded_dt = 1 / (2 * np.max(FreqStacking.padded_freqs))
-        d = wave_speed * np.arange(
-            -len(sww_td) / 2 * padded_dt, len(sww_td) / 2 * padded_dt, padded_dt
-        )
-        idx_to_plot = np.argwhere(abs(d) < 10)
-        plt.plot(
-            d[idx_to_plot],
-            20 * np.log10(abs(sww_td[idx_to_plot]) / max(abs(sww_td[idx_to_plot]))),
-        )
+        if time_domain_analysis:
+            sww_td = np.fft.fftshift(
+                len(sww_spectrum) * np.real(np.fft.ifft(np.fft.ifftshift(sww_spectrum)))
+            )
+            plt.figure(2)
+            # plt.subplot(2, 2, ii + 1)
+            # plt.title(input_filename)
+            wave_speed = 2e8  # [m/s] -- approx val for coax
+            padded_dt = 1 / (2 * np.max(FreqStacking.padded_freqs))
+            d = wave_speed * np.arange(
+                -len(sww_td) / 2 * padded_dt, len(sww_td) / 2 * padded_dt, padded_dt
+            )
+            idx_to_plot = np.argwhere(abs(d) < 10)
+            sww_td_env = abs(hilbert(sww_td))
+            plt.plot(
+                d[idx_to_plot],
+                20 * np.log10(sww_td_env[idx_to_plot] / max(sww_td_env[idx_to_plot])),
+            )
+            plt.grid()
 
     plt.figure(1)
-    plt.title(f"SWW Spectrum")
+    plt.suptitle(f"CH1 SWW Spectrum")
     plt.ylim([-80, 0])
     plt.xlabel("Freq [MHz]")
     plt.ylabel("Normalized Magnitude [dB]")
-    plt.grid()
+    # plt.grid()
 
-    plt.figure(2)
-    plt.title("Reconstructed A-scan")
-    plt.grid()
-    plt.xlabel("Range [m]")
-    plt.xlim([-5, 5])
+    if time_domain_analysis:
+        plt.figure(2)
+        plt.title("Reconstructed A-scans")
+        plt.grid()
+        plt.xlabel("Range [m]")
+        plt.xlim([-5, 5])
+
     plt.show()
 
 

@@ -105,8 +105,8 @@ class DataLoader:
                 "num_samples": num_samples,
                 "sampling_rate": int(data["sampling_rate"]),
                 "center_freqs": data["frequencies"].flatten(),
-                "chirp_duration": float(data["chirp_duration"])
-                / int(data["sampling_rate"]) ** 2,  # (fix bug in acquisition code)
+                "chirp_duration": float(data["chirp_duration"]),
+                # / int(data["sampling_rate"]) ** 2,  # (fix bug in acquisition code)
                 "chirp_bw": int(data["chirp_bw"]),
             }
         )

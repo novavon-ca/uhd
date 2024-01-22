@@ -33,10 +33,9 @@ def dc_chirp(ampl, bw, fs, duration, pad_length: int = 4096, ret_time_samples=Fa
         return chirp
 
 
-def chirp(fs_Hz, rep_Hz, f0_Hz, f1_Hz, periods=1, phase_rad=0, ret_time_samples=False):
-    T_s = 1 / rep_Hz  # Period of chirp in seconds.
+def chirp(fs_Hz, T_s, f0_Hz, f1_Hz, periods=1, phase_rad=0, ret_time_samples=False):
     c = (f1_Hz - f0_Hz) / T_s  # Chirp rate in Hz/s.
-    n = int(fs_Hz / rep_Hz)  # Samples per repetition.
+    n = int(fs_Hz * T_s)  # Samples per repetition.
     t_s = np.linspace(0, T_s, n)  # Chirp sample times.
 
     # Phase, phi_Hz, is integral of frequency, f(t) = ct + f0.
