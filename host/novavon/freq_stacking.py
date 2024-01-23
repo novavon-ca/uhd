@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import windows, hilbert
 from waveforms import dc_chirp, chirp
-from utilities import nextpow2, DataLoader
+from utilities import trim_time_domain_data, DataLoader
 from typing import List
 from enum import Enum, auto
 
@@ -13,39 +13,6 @@ class WindowType(Enum):
     RECT = auto()
     HAMMING = auto()
     TUKEY = auto()
-
-
-def time_window(recv_data_list, pulse_duration_samples, plot=False):
-    threshold = 0.3
-    new_num_samples = int(
-        1.0 * pulse_duration_samples
-    )  # this might need to change in future
-    head = 2000
-    num_freqs, num_channels, num_samples = recv_data_list.shape
-    data_trimmed = np.empty(
-        [num_freqs, num_channels, new_num_samples], dtype=np.complex64
-    )
-    if plot:
-        plt.figure()
-    for f_idx in range(num_freqs):
-        a = np.real(recv_data_list[f_idx][0])
-        b = np.real(recv_data_list[f_idx][1])
-        toa0 = np.argwhere(np.abs(a) >= threshold * np.max(abs(a)))[0][0]
-        toa1 = np.argwhere(np.abs(b) >= threshold * np.max(abs(b)))[0][0]
-        if abs(toa1 - toa0) > head:
-            print(f"problem :(   fidx = {f_idx}")
-            toa = min([toa0, toa1])
-        else:
-            toa = int(0.5 * (toa0 + toa1))
-        start = min([max([0, toa - head]), num_samples - new_num_samples])
-        stop = start + new_num_samples
-        data_trimmed[f_idx][0] = recv_data_list[f_idx][0][start:stop]
-        data_trimmed[f_idx][1] = recv_data_list[f_idx][1][start:stop]
-        if plot:
-            plt.cla()
-            plt.plot(np.real(data_trimmed[f_idx][0]))
-            plt.plot(np.real(data_trimmed[f_idx][1]))
-    return data_trimmed
 
 
 class FrequencyStacking:
@@ -120,7 +87,7 @@ class FrequencyStacking:
 
             # 1. Compute compressed subpulse spectrum
             compressed_pulse = self.matched_filter(
-                ii, data_chan, reference_chan, correct_phs_only=True
+                ii, data_chan, reference_chan, meas_phs_only=True
             )
 
             # 2. Filter baseband pulse with rect window having Bs >= Bi
@@ -188,7 +155,7 @@ class FrequencyStacking:
         freq_idx: int,
         data_chan: int,
         ref_chan: int,
-        correct_phs_only: bool = False,
+        meas_phs_only: bool = False,
     ) -> np.ndarray:
         # if channel indices are in range of real connected channels, use experimental data; otherwise use ideal chirp
         Zi = (
@@ -202,8 +169,8 @@ class FrequencyStacking:
             else self.ideal_chirp_fd
         )
         Di = Zi * np.conj(Vi)
-        if correct_phs_only:
-            return np.abs(Zi) * np.exp(1j * np.angle(Di))
+        if meas_phs_only:
+            return np.abs(Zi * self.ideal_chirp_fd) * np.exp(1j * np.angle(Di))
         else:
             return Di
 
@@ -211,10 +178,12 @@ class FrequencyStacking:
 def main():
     input_dir = "/Users/hannah/Documents/TerraWave/test data/"
     input_filenames = [
-        "sfcw_jan22_12mhzchirp_A.mat",
-        "sfcw_jan22_12mhzchirp_B.mat",
-        "sfcw_jan22_15mhzchirp_A.mat",
-        "sfcw_jan22_15mhzchirp_B.mat",
+        "sfcw_jan23_12mhzchirp_adjGain.mat",
+        "sfcw_jan23_15mhzchirp_adjGain.mat",
+        # "sfcw_jan22_12mhzchirp_A.mat",
+        # "sfcw_jan22_12mhzchirp_B.mat",
+        # "sfcw_jan22_15mhzchirp_A.mat",
+        # "sfcw_jan22_15mhzchirp_B.mat",
     ]
     data_ch_idx = 1
     ref_ch_idx = 0
@@ -225,7 +194,7 @@ def main():
         Loader = DataLoader()
         input_filename = input_filenames[ii]
         Loader.load_mat(input_dir + input_filename)
-        trimmed_data = time_window(
+        trimmed_data = trim_time_domain_data(
             Loader.recv_data_list,
             Loader.p["chirp_duration"] * Loader.p["sampling_rate"],
         )

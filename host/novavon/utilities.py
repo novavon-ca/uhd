@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from typing import List
+import numpy as np
 
 
 def validate_args(min_freq: int, max_freq: int, chirp_bw: int, sampling_rate: int):
@@ -70,6 +71,41 @@ def nextpow2(i):
     while n < i:
         n *= 2
     return n
+
+
+def trim_time_domain_data(recv_data_list, pulse_duration_samples, plot=False):
+    threshold = 0.3
+    new_num_samples = int(
+        1.0 * pulse_duration_samples
+    )  # this might need to change in future
+    head = 2000
+    num_freqs, num_channels, num_samples = recv_data_list.shape
+    data_trimmed = np.empty(
+        [num_freqs, num_channels, new_num_samples], dtype=np.complex64
+    )
+    if plot:
+        import matplotlib.pyplot as plt
+
+        plt.figure()
+    for f_idx in range(num_freqs):
+        a = np.real(recv_data_list[f_idx][0])
+        b = np.real(recv_data_list[f_idx][1])
+        toa0 = np.argwhere(np.abs(a) >= threshold * np.max(abs(a)))[0][0]
+        toa1 = np.argwhere(np.abs(b) >= threshold * np.max(abs(b)))[0][0]
+        if abs(toa1 - toa0) > head:
+            print(f"problem :(   fidx = {f_idx}")
+            toa = min([toa0, toa1])
+        else:
+            toa = int(0.5 * (toa0 + toa1))
+        start = min([max([0, toa - head]), num_samples - new_num_samples])
+        stop = start + new_num_samples
+        data_trimmed[f_idx][0] = recv_data_list[f_idx][0][start:stop]
+        data_trimmed[f_idx][1] = recv_data_list[f_idx][1][start:stop]
+        if plot:
+            plt.cla()
+            plt.plot(np.real(data_trimmed[f_idx][0]))
+            plt.plot(np.real(data_trimmed[f_idx][1]))
+    return data_trimmed
 
 
 class DataLoader:
