@@ -176,19 +176,29 @@ class FrequencyStacking:
 
 
 def main():
-    input_dir = "/Users/hannah/Documents/TerraWave/test data/"
+    input_dir = "/Users/hannah/Documents/TerraWave/test data/Feb 5 Range Testing/"
     input_filenames = [
-        "sfcw_jan23_12mhzchirp_adjGain.mat",
-        "sfcw_jan23_15mhzchirp_adjGain.mat",
-        # "sfcw_jan22_12mhzchirp_A.mat",
-        # "sfcw_jan22_12mhzchirp_B.mat",
-        # "sfcw_jan22_15mhzchirp_A.mat",
-        # "sfcw_jan22_15mhzchirp_B.mat",
+        # "emptyRoom_greenAnt_2ftback.mat",
+        # "inside_5ft_greenAnt_2ftback.mat",
+        "emptyRoom_greenAnt.mat",
+        "inside_3ft_greenAnt.mat",
+        "inside_4ft_greenAnt.mat",
+        "inside_5ft_greenAnt.mat",
+        "inside_8ft_greenAnt.mat",
+        "inside_10ft_greenAnt.mat",
     ]
     data_ch_idx = 1
     ref_ch_idx = 0
     time_domain_analysis = True
-    gls_flag = True
+    gls_flag = False
+    subtract_cal_scan = True
+    subtract_cable_len_ft = (93.5 + 110 - 12) / 12
+
+    speed_in_cable = 2e8
+    speed_in_air = 3e8  # [m/s]
+    ft_per_meter = 3.28
+    num_rows = 2
+    num_cols = int(np.ceil(len(input_filenames) / 2))
 
     for ii in range(len(input_filenames)):
         Loader = DataLoader()
@@ -198,6 +208,7 @@ def main():
             Loader.recv_data_list,
             Loader.p["chirp_duration"] * Loader.p["sampling_rate"],
         )
+
         FreqStacking = FrequencyStacking(trimmed_data, Loader.p, verbose=True)
         sww_spectrum = FreqStacking.compute_sww(data_ch_idx, ref_ch_idx)
         if gls_flag:
@@ -205,7 +216,7 @@ def main():
             sww_spectrum = gls_filter * sww_spectrum
 
         plt.figure(1)
-        plt.subplot(2, 2, ii + 1)
+        plt.subplot(num_rows, num_cols, ii + 1)
         plt.title(input_filename)
         idx_to_plot = np.nonzero(sww_spectrum)
         plt.plot(
@@ -222,21 +233,45 @@ def main():
             sww_td = np.fft.fftshift(
                 len(sww_spectrum) * np.real(np.fft.ifft(np.fft.ifftshift(sww_spectrum)))
             )
+            if subtract_cal_scan:
+                if ii == 0:
+                    cal_td = sww_td
+                else:
+                    sww_td = sww_td - cal_td
+
             plt.figure(2)
-            # plt.subplot(2, 2, ii + 1)
-            # plt.title(input_filename)
-            wave_speed = 2e8  # [m/s] -- approx val for coax
+            plt.subplot(num_rows, num_cols, ii + 1)
+            plt.title(input_filename)
+
             padded_dt = 1 / (2 * np.max(FreqStacking.padded_freqs))
-            d = wave_speed * np.arange(
+            time_vec = np.arange(
                 -len(sww_td) / 2 * padded_dt, len(sww_td) / 2 * padded_dt, padded_dt
             )
+
+            if subtract_cable_len_ft:
+                extra_travel_time = subtract_cable_len_ft / (
+                    speed_in_cable * ft_per_meter
+                )
+                time_vec = time_vec - extra_travel_time
+
+            d = speed_in_air * time_vec / 2  # account for 2-way travel time
             idx_to_plot = np.argwhere(abs(d) < 10)
             sww_td_env = abs(hilbert(sww_td))
+            d = d * ft_per_meter  # convert m to ft
+
             plt.plot(
                 d[idx_to_plot],
                 20 * np.log10(sww_td_env[idx_to_plot] / max(sww_td_env[idx_to_plot])),
             )
             plt.grid()
+            plt.xlim([0, 30])
+            plt.ylim([-40, 2])
+
+            plt.figure(3)
+            plt.plot(
+                d[idx_to_plot],
+                20 * np.log10(sww_td_env[idx_to_plot] / max(sww_td_env[idx_to_plot])),
+            )
 
     plt.figure(1)
     plt.suptitle(f"CH1 SWW Spectrum")
@@ -247,10 +282,15 @@ def main():
 
     if time_domain_analysis:
         plt.figure(2)
-        plt.title("Reconstructed A-scans")
-        plt.grid()
-        plt.xlabel("Range [m]")
-        plt.xlim([-5, 5])
+        plt.suptitle("Reconstructed A-scans")
+        # plt.grid()
+        plt.xlabel("Range [ft]")
+
+        plt.figure(3)
+        plt.suptitle("Reconstructed A-scans")
+        plt.grid(True)
+        plt.xlabel("Range [ft]")
+        plt.legend(["empty", "3ft", "4ft", "5ft", "8ft", "10ft"], loc="upper right")
 
     plt.show()
 
