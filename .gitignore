@@ -4,3 +4,6 @@ debian
 *.pyc
 .DS_Store
 *.mat
+.vscode
+*.csv
+*_copy.py

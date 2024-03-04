@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from typing import List
+import numpy as np
 
 
 def validate_args(min_freq: int, max_freq: int, chirp_bw: int, sampling_rate: int):
@@ -60,3 +61,124 @@ class LogFormatter(logging.Formatter):
         else:
             formatted_date = LogFormatter.pp_now()
         return formatted_date
+
+
+def nextpow2(i):
+    """
+    Find 2^n that is equal to or greater than i.
+    """
+    n = 1
+    while n < i:
+        n *= 2
+    return n
+
+
+def trim_time_domain_data(recv_data_list, pulse_duration_samples, plot=False):
+    threshold = 0.3
+    new_num_samples = int(
+        1.0 * pulse_duration_samples
+    )  # this might need to change in future
+    head = 2000
+    num_freqs, num_channels, num_samples = recv_data_list.shape
+    data_trimmed = np.empty(
+        [num_freqs, num_channels, new_num_samples], dtype=np.complex64
+    )
+    if plot:
+        import matplotlib.pyplot as plt
+
+        plt.figure()
+    for f_idx in range(num_freqs):
+        a = np.real(recv_data_list[f_idx][0])
+        b = np.real(recv_data_list[f_idx][1])
+        toa0 = np.argwhere(np.abs(a) >= threshold * np.max(abs(a)))[0][0]
+        toa1 = np.argwhere(np.abs(b) >= threshold * np.max(abs(b)))[0][0]
+        if abs(toa1 - toa0) > head:
+            print(f"problem :(   fidx = {f_idx}")
+            toa = min([toa0, toa1])
+        else:
+            toa = int(0.5 * (toa0 + toa1))
+        start = min([max([0, toa - head]), num_samples - new_num_samples])
+        stop = start + new_num_samples
+        data_trimmed[f_idx][0] = recv_data_list[f_idx][0][start:stop]
+        data_trimmed[f_idx][1] = recv_data_list[f_idx][1][start:stop]
+        if plot:
+            plt.cla()
+            plt.plot(np.real(data_trimmed[f_idx][0]))
+            plt.plot(np.real(data_trimmed[f_idx][1]))
+    return data_trimmed
+
+
+class DataLoader:
+    def __init__(self, verbose: bool = True, plot_flag: bool = False) -> None:
+        self.verbose: bool = verbose
+        self.plot_flag: bool = plot_flag
+        self.recv_data_list: List = []
+        self.p: dict = {
+            "num_freqs": 0,
+            "num_channels": 0,
+            "num_samples": 0,
+            "sampling_rate": 0,
+            "center_freqs": [],
+            "chirp_duration": 0.0,
+            "chirp_bw": 0,
+        }
+
+    def load_mat(self, filename: str) -> None:
+        """
+        Read data and acquisition parameters from .mat file
+        """
+        from scipy.io import loadmat
+
+        data = loadmat(filename)
+        if self.verbose:
+            print("Reading ", data["__header__"])
+        self.recv_data_list = data["data"]
+        num_freqs, num_channels, num_samples = self.recv_data_list.shape
+        self.p.update(
+            {
+                "num_freqs": num_freqs,
+                "num_channels": num_channels,
+                "num_samples": num_samples,
+                "sampling_rate": int(data["sampling_rate"]),
+                "center_freqs": data["frequencies"].flatten(),
+                "chirp_duration": float(data["chirp_duration"]),
+                # / int(data["sampling_rate"]) ** 2,  # (fix bug in acquisition code)
+                "chirp_bw": int(data["chirp_bw"]),
+            }
+        )
+
+        if self.plot_flag:
+            self.plot_data()
+
+    def plot_data(self):
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        n = self.p["num_samples"]
+        fs = self.p["sampling_rate"]
+        n_freq = self.p["num_freqs"]
+        time_vector = 1 / fs * np.linspace(0, n, num=n)
+
+        legend1_text = []
+        legend2_text = []
+        plt.figure()
+        for ii in range(n_freq):
+            if ii < n_freq / 2:
+                plt.subplot(211)
+                legend1_text.append(f"f {ii+1}")
+            else:
+                plt.subplot(212)
+                legend2_text.append(f"f {ii+1}")
+            plt.plot(
+                time_vector * 1e6,
+                np.real(self.recv_data_list[ii][0]),
+            )
+
+        plt.title("Raw Time-Domain Data")
+        # plt.xlabel("Time [Samples]")
+        plt.xlabel("Time [us]")
+        plt.legend(legend2_text)
+        plt.grid("True")
+        plt.subplot(211)
+        plt.legend(legend1_text)
+        plt.grid("True")
