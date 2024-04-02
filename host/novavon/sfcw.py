@@ -4,14 +4,12 @@ import numpy as np
 import sys
 import time
 import threading
-from typing import Any, List
 import matplotlib.pyplot as plt
 from scipy.io import savemat
 import json 
 
 from utilities import LogFormatter
-# from waveforms import dc_chirp
-# from usrp_settings import usrp_setup, setup_streamers
+
 
 def setup_device(samp_rate, logger, verbose=False):
     subdev = "A:A A:B"
@@ -69,6 +67,7 @@ def setup_device(samp_rate, logger, verbose=False):
 
 def tx_worker(usrp, tx_streamer, tx_data, tx_md):
     total_samps = 2000
+    TX_DELAY = 0.012
     num_acc_samps = 0
     num_tx_samps = 0
     num_channels = tx_streamer.get_num_channels()
@@ -100,8 +99,6 @@ def tune_center_freq(usrp, target_freq, add_rx_gain):
     return
 
 def rx_and_save(usrp, rx_streamer, rx_buffer, rx_md, num_samps, current_freq):
-    if current_freq > END_FREQ:
-        return
 
     # logger.info("Current freq: %d MHz", current_freq/1e6)
     stream_cmd = uhd.types.StreamCMD(uhd.types.StreamMode.num_done)
@@ -154,16 +151,16 @@ def generate_tx_data(samp_rate, chirp_bw):
     return tx_data, tx_md, chirp.size, chirp_duration
 
 
-def get_gain_adjustments(filename):
+def get_gain_adjustments(filename, start_freq, chirp_bw):
     with open(filename, "r") as f:
         gain_table = json.load(f)
     
-    gain_table = gain_table.get(str(int(CHIRP_BW)), None)
+    gain_table = gain_table.get(str(int(chirp_bw)), None)
     if gain_table is not None:
         gain_ch0 = gain_table["factors"][0]
         gain_ch1 = gain_table["factors"][1]
         try:
-            idx = np.argwhere(np.array(gain_table["freqs"])==START_FREQ)[0][0]
+            idx = np.argwhere(np.array(gain_table["freqs"])==start_freq)[0][0]
             gain_ch0 = gain_ch0[idx:]
             gain_ch1 = gain_ch1[idx:]
             print('Found gain compensation factors')
@@ -176,14 +173,14 @@ def get_gain_adjustments(filename):
     return gain_ch0, gain_ch1
 
 def main():
-    output_filename = 'TEST.mat'
+    output_filename = 'soil_potatoLevels5.mat'
     plot_data = False
 
     usrp, tx_streamer, rx_streamer = setup_device(SAMP_RATE, logger, verbose=False)
 
     tx_data, tx_md, chirp_samples, chirp_duration = generate_tx_data(SAMP_RATE, CHIRP_BW)
     
-    gain_ch0, gain_ch1 = get_gain_adjustments("./gain_tables.json")
+    gain_ch0, gain_ch1 = get_gain_adjustments("/home/novavon/Desktop/gain_tables.json")
     
     # create receive buffers
     num_rx_samps = chirp_samples * 3
@@ -274,7 +271,6 @@ if __name__ == "__main__":
     FREQ_STEP = 15e6
     CHIRP_BW = 15e6
     SAMP_RATE = 16e6
-    TX_DELAY = 0.012
 
     global logger
     logger = logging.getLogger(__name__)
